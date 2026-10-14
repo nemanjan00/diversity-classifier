@@ -157,6 +157,10 @@ a { color: inherit; }
 	padding: 8px; border-radius: 6px; background: var(--muted);
 }
 .dc-mark { background: color-mix(in oklch, var(--chart-1) 25%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
+.dc-line-raw .dc-mark { background: color-mix(in oklch, var(--chart-1) 12%, transparent); }
+.dc-mark-filter { cursor: pointer; }
+.dc-mark-filter:hover { outline: 1px solid var(--chart-1); background: color-mix(in oklch, var(--chart-1) 35%, transparent); }
+.dc-paused { background: var(--chart-1); color: var(--primary-foreground); }
 .dc-kv { border-collapse: collapse; font-size: 12px; width: 100%; }
 .dc-kv th { text-align: left; font-family: var(--dc-mono); font-weight: 500; color: var(--muted-foreground); padding: 2px 10px 2px 0; white-space: nowrap; vertical-align: top; width: 1%; }
 .dc-kv td { font-family: var(--dc-mono); padding: 2px 0; word-break: break-all; }

@@ -192,6 +192,9 @@ npx -y @nemanjan00/diversity-streamer --http 7070      # or let the agent call t
 
 - **Discover**: query bar, time picker, live mode, a hits histogram, a field
   sidebar with top values and +/− filters, and an expandable event table.
+  Field values are highlighted in each line: click one to filter for it,
+  Alt/Shift-click to exclude it. Opening an event pauses live mode until you
+  resume.
 - **Classifiers**: an explorer tree and per-classifier pages with one
   histogram and one over-time panel per field. Panels cross-filter: click
   `status=503` to see which hosts and latencies go with it. Also includes an

@@ -6,7 +6,7 @@ import { api } from "../lib/api.js";
 import { resource } from "../lib/resource.js";
 import { live } from "../lib/live.js";
 import {
-	view, queryArgs, timeBounds, setAbsoluteRange, addFilter, go, formatNumber, formatTime, formatValue
+	view, queryArgs, timeBounds, setAbsoluteRange, addFilter, go, formatNumber, formatTime, formatValue, pauseLive
 } from "../lib/view.js";
 import { timeChart, termsBars } from "../lib/charts.js";
 import { vizPreset } from "./visualize.js";
@@ -24,8 +24,23 @@ const classifierArg = () => {
 	return view.c || undefined;
 };
 
-/** Wrap raw-line occurrences of field values in <mark>. */
-const highlightRaw = (raw, fields) => {
+/** Click a value: filter for it; Alt/Shift-click: exclude it. Pauses live updates. */
+const filterFromValue = (field, value) => {
+	return (event) => {
+		event.stopPropagation();
+		event.preventDefault();
+		pauseLive("filtering from an event");
+		addFilter({ field, value, negate: event.altKey || event.shiftKey });
+	};
+};
+
+/**
+ * Wrap raw-line occurrences of field values in clickable <mark>s.
+ * @param {string} raw
+ * @param {object} fields
+ * @param {{ inline?: boolean }} [options] inline: <span> for the collapsed row instead of <pre>
+ */
+const highlightRaw = (raw, fields, options) => {
 	const text = raw || "";
 	const candidates = Object.keys(fields || {}).map((name) => {
 		const value = fields[name];
@@ -48,7 +63,7 @@ const highlightRaw = (raw, fields) => {
 			});
 
 			if (!overlaps) {
-				taken.push({ start: idx, end, name: c.name });
+				taken.push({ start: idx, end, name: c.name, value: fields[c.name] });
 				return;
 			}
 
@@ -65,10 +80,19 @@ const highlightRaw = (raw, fields) => {
 	let last = 0;
 	taken.forEach((t) => {
 		parts.push(text.slice(last, t.start));
-		parts.push(el("mark", { class: "dc-mark", title: t.name }, text.slice(t.start, t.end)));
+		parts.push(el("mark", {
+			class: "dc-mark dc-mark-filter",
+			title: t.name + " = " + formatValue(t.value) + "\nclick: filter · alt/shift-click: exclude",
+			onclick: filterFromValue(t.name, t.value)
+		}, text.slice(t.start, t.end)));
 		last = t.end;
 	});
 	parts.push(text.slice(last));
+
+	if (options && options.inline) {
+		return el("span", { class: "dc-line-raw" }, ...parts);
+	}
+
 	return el("pre", { class: "dc-raw" }, ...parts);
 };
 
@@ -174,6 +198,10 @@ const EventRow = (event, expanded) => {
 	return el("div", { class: "dc-event" },
 		el("div", { class: "dc-event-line", onclick: () => {
 			expanded[event.id] = !expanded[event.id];
+
+			if (expanded[event.id]) {
+				pauseLive("inspecting an event");
+			}
 		} },
 		el("span", { class: "dc-caret" }, () => {
 			return expanded[event.id] ? "▾" : "▸";
@@ -191,11 +219,19 @@ const EventRow = (event, expanded) => {
 						value = event.labels ? event.labels[c.slice(8)] : undefined;
 					}
 
-					return el("span", { class: "dc-col" }, el("small", {}, c), formatValue(value));
+					return el("span", {
+						class: "dc-col dc-mark-filter",
+						title: c + " = " + formatValue(value) + "\nclick: filter · alt/shift-click: exclude",
+						onclick: value === undefined ? null : filterFromValue(c, value)
+					}, el("small", {}, c), formatValue(value));
 				}));
 			}
 
-			return el("span", { class: "dc-line-raw" }, event.raw !== undefined ? event.raw : Object.keys(event.fields).map((k) => {
+			if (event.raw !== undefined) {
+				return highlightRaw(event.raw, event.fields, { inline: true });
+			}
+
+			return el("span", { class: "dc-line-raw" }, Object.keys(event.fields).map((k) => {
 				return k + "=" + formatValue(event.fields[k]);
 			}).join(" "));
 		}),

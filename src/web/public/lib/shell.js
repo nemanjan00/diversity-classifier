@@ -3,7 +3,8 @@ import {
 	Button, Input, Badge, NativeSelect, NativeSelectOption
 } from "@nemanjan00/qrp-shadcdn";
 import {
-	view, RANGES, REFRESH, refresh, hrefFor, addFilter, updateFilter, removeFilter, describeFilter, formatTime
+	view, RANGES, REFRESH, refresh, hrefFor, addFilter, updateFilter, removeFilter, describeFilter, formatTime,
+	pause, pauseLive, resumeLive
 } from "./view.js";
 import { live } from "./live.js";
 import { api } from "./api.js";
@@ -184,6 +185,19 @@ const TimePicker = () => {
 				return view.refresh === ms;
 			} }, ms ? "Live " + (ms / 1000) + "s" : "Live off");
 		})),
+		() => {
+			if (!view.refresh) {
+				return null;
+			}
+
+			if (pause.on) {
+				return Button({ size: "sm", class: "dc-paused", onclick: resumeLive, title: pause.reason ? "Paused: " + pause.reason : "Paused" }, "Paused · Resume");
+			}
+
+			return Button({ size: "sm", variant: "outline", onclick: () => {
+				pauseLive("paused by you");
+			}, title: "Pause live updates" }, "Pause");
+		},
 		Button({ size: "sm", variant: "outline", onclick: refresh, title: "Refresh now" }, "Refresh"));
 };
 

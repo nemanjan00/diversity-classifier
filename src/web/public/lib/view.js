@@ -29,6 +29,30 @@ export const view = state(Object.assign({}, DEFAULTS, { filters: [], cols: [] })
 /** Bumped to force every data effect to refetch (refresh button, live timer, definition changes). */
 export const tick = state({ n: 0 });
 
+/**
+ * Live-update pause (not part of the URL): set while the user inspects an
+ * event, so the list does not move under their cursor.
+ */
+export const pause = state({ on: false, reason: "" });
+
+/** Pause live refresh if it is running. */
+export const pauseLive = (reason) => {
+	if (view.refresh > 0 && !pause.on) {
+		batch(() => {
+			pause.on = true;
+			pause.reason = reason || "";
+		});
+	}
+};
+
+export const resumeLive = () => {
+	batch(() => {
+		pause.on = false;
+		pause.reason = "";
+	});
+	tick.n++;
+};
+
 export const refresh = () => {
 	tick.n++;
 };
@@ -143,10 +167,19 @@ export const startUrlSync = () => {
 	let timer = null;
 	effect(() => {
 		const ms = view.refresh;
+		const paused = pause.on;
 		clearInterval(timer);
 
-		if (ms > 0) {
+		if (ms > 0 && !paused) {
 			timer = setInterval(refresh, ms);
+		}
+	});
+
+	effect(() => {
+		if (!view.refresh && untracked(() => {
+			return pause.on;
+		})) {
+			pause.on = false;
 		}
 	});
 };
