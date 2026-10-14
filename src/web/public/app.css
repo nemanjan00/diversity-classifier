@@ -192,8 +192,9 @@ a { color: inherit; }
 .dc-tooltip-row { display: flex; gap: 6px; align-items: center; }
 .dc-tooltip-key { flex: 1; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .dc-swatch { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex: none; }
-.dc-legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; }
-.dc-legend-item { all: unset; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; font-family: var(--dc-mono); }
+.dc-legend { display: flex; gap: 4px 10px; flex-wrap: wrap; font-size: 11px; min-width: 0; max-height: 7.5em; overflow-y: auto; }
+.dc-legend-item { all: unset; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; font-family: var(--dc-mono); max-width: 100%; min-width: 0; }
+.dc-legend-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dc-legend-item:hover { text-decoration: underline; }
 .dc-empty-chart { color: var(--muted-foreground); font-size: 12px; padding: 16px 0; text-align: center; }
 .dc-spark { display: block; flex: none; }
@@ -270,6 +271,7 @@ a { color: inherit; }
 .dc-down { color: var(--destructive); font-size: 12px; }
 .dc-dash-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--dc-gap); }
 .dc-panel-title { font-weight: 600; text-decoration: none; }
+.dc-panel { min-width: 0; overflow: hidden; }
 .dc-create { max-width: 720px; }
 .dc-field { display: flex; flex-direction: column; gap: 4px; }
 

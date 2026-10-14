@@ -12,6 +12,19 @@ const W = 1000;
 const PALETTE = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)",
 	"oklch(65% .15 200)", "oklch(60% .2 330)", "oklch(70% .12 120)", "oklch(55% .05 250)"];
 
+const LEGEND_LABEL_MAX = 48;
+
+/** Shorten long labels in the middle: keys such as task/pod ids often differ only there. */
+export const middleEllipsis = (text, max) => {
+	if (text.length <= max) {
+		return text;
+	}
+
+	const head = Math.ceil((max - 1) / 2);
+	const tail = Math.floor((max - 1) / 2);
+	return text.slice(0, head) + "…" + text.slice(text.length - tail);
+};
+
 export const colorFor = (index) => {
 	return PALETTE[index % PALETTE.length];
 };
@@ -209,7 +222,7 @@ export const timeChart = (opts) => {
 					opts.onSeries(s.key);
 				}
 			}
-		}, el("span", { class: "dc-swatch", style: "background:" + colorFor(si) }), s.key);
+		}, el("span", { class: "dc-swatch", style: "background:" + colorFor(si) }), el("span", { class: "dc-legend-label" }, middleEllipsis(String(s.key), LEGEND_LABEL_MAX)));
 	})) : null;
 
 	return el("div", { class: "dc-chart" },
