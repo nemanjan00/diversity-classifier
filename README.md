@@ -39,11 +39,37 @@ per-field histograms, timeseries, dashboards the agent can build for you.
 ```sh
 # in your project (Node >= 20):
 claude mcp add logs -- npx -y @nemanjan00/diversity-streamer
+
+# …or with the web UI on http://127.0.0.1:7070 while the session runs:
+claude mcp add logs -- npx -y @nemanjan00/diversity-streamer --http 7070
 ```
 
 Published on npm as [`@nemanjan00/diversity-streamer`](https://www.npmjs.com/package/@nemanjan00/diversity-streamer).
 The state file is created in the directory Claude Code starts the server in,
-i.e. your project.
+i.e. your project (`.claude/diversity-classifier.json`).
+
+**Other MCP clients / `.mcp.json`:**
+
+```json
+{
+  "mcpServers": {
+    "logs": {
+      "command": "npx",
+      "args": ["-y", "@nemanjan00/diversity-streamer", "--http", "7070"]
+    }
+  }
+}
+```
+
+**Updating.** npx caches the version it downloaded first. Pin
+`@nemanjan00/diversity-streamer@latest` (or an exact version) in the command
+to pick up new releases, then reconnect the server (`/mcp` in Claude Code).
+
+**Standalone**, without an agent (explore logs in the web UI; stop with Ctrl+C):
+
+```sh
+npx -y @nemanjan00/diversity-streamer --http 7070 --cmd "api=ssh prod-1 journalctl -fu api -o short-iso"
+```
 
 Then ask: *"Watch the API logs on prod-1 (`ssh prod-1 journalctl -fu api -o short-iso`), classify what's there and alert me on anything unusual."*
 
