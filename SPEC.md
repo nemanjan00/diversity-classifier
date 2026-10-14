@@ -5,6 +5,12 @@ streaming every line into the model's context.
 
 ## 1. Problem
 
+> **Scope:** this is a developer tool. An AI agent (e.g. Claude Code) starts
+> it as an MCP server and points it at streams, typically a command such as
+> `ssh prod-1 journalctl -fu api` or `kubectl logs -f ...`. It is not meant to be
+> embedded in or deployed alongside a production application.
+
+
 LLM agents cannot consume a live stream, and pasting logs into context is
 expensive. Most logs, though, are a few templates repeated millions of times.
 If the agent teaches the server those templates once, the server can do the
@@ -409,9 +415,14 @@ so multiline records from different streams never interleave.
   same field value (e.g. `request_id`), which lets one stream's event be
   matched to another's.
 
-> **Security:** `command` sources run shell commands as the server user. A CLI
-> flag `--allow-commands` (off by default) controls whether the agent may add
-> them through tools. Startup flags are always allowed.
+`command` is the primary source type. The agent typically adds sources like
+`ssh host tail -F /var/log/app.log` itself through `add_source`.
+
+> **Security:** `command` sources run shell commands as the user who started the
+> server. That is the same trust level the agent already has in a coding
+> session. `--no-commands` disables `command` sources added through tools
+> (MCP or web), for setups where the agent should only see pre-configured
+> streams.
 
 ## 11. MCP surface
 
@@ -435,6 +446,7 @@ so multiline records from different streams never interleave.
 | `ingest` | Push lines. |
 | `dismiss_cluster` | Hide an unclassified cluster from digests without classifying it (persisted by shape). |
 | `set_notifications` | Mute, unmute, debounce timing. |
+| `web_ui` | Start the web UI on demand (if not started with `--http`) and return its URL. |
 | `export_definitions` / `import_definitions` | Share classifier packs (JSON) between projects. |
 
 Every tool result is compact JSON text. Large lists are paginated with `limit`
@@ -499,18 +511,15 @@ the change is announced through a `source`-kind notification.
 ## 13. Web UI (optional)
 
 The engine can also be served over HTTP. The web server is off by default and
-is enabled with `--http [host:]port`, or by running in daemon mode.
+is enabled with `--http [host:]port`, or on demand with the `web_ui` tool.
 
-### 13.1 Run modes
+### 13.1 Running
 
-| Mode | Entrypoint | Transport | Use |
-|---|---|---|---|
-| stdio | `node bin/mcp.js [--http 7070]` | MCP over stdio. The web UI is optional and runs in the same process. | Claude Code launches it per session. |
-| daemon | `forever src` (`yarn web`) | MCP Streamable HTTP at `/mcp`, plus the web UI and REST API | Long-running watcher. Several agents or sessions can attach to the same engine and state. |
-
-In daemon mode the sources keep running when no agent is connected, so
-metrics and alarm history accumulate between sessions. Alarm notifications
-are queued (capped) and delivered when an agent connects.
+The agent launches the server over stdio as usual. Passing `--http [host:]port`
+(or calling the `web_ui` tool, which starts the server on demand and returns the
+URL) additionally serves the UI from the same process. The UI shows the same
+engine, sources and state the agent is using, and it stops when the MCP
+session ends.
 
 ### 13.2 Security
 
@@ -520,14 +529,13 @@ are queued (capped) and delivered when an agent connects.
   asks for it once and keeps it in `sessionStorage`.
 * `--read-only` disables every mutating endpoint. This is useful when the UI
   is shared with a team.
-* The `command`-source restriction (`--allow-commands`) applies to HTTP the
-  same way it applies to MCP tools.
+* `--no-commands` applies to HTTP the same way it applies to MCP tools.
 
 ### 13.3 REST API + live updates
 
 * `POST /api/<tool>` mirrors every MCP tool one to one, with the same handlers
   and the same JSON arguments. The MCP and REST layers are both thin adapters
-  over `src/mcp`'s handler table, so the two can never drift apart.
+  over one handler table, so the two can never drift apart.
 * `GET /api/events/stream` is **SSE**. It carries: `record` (sampled live tail;
   the client picks the sample rate and filters), `cluster` (new or grown),
   `alarm`, `source`, `stats` (every 2 s) and `definitions` (changed).
@@ -594,7 +602,7 @@ as constants in `src/config`:
 | `DIGEST_QUIET_MS` | 5000 |
 | `DIGEST_MAX_WAIT_MS` | 60000 |
 | `ALARM_HISTORY` | 500 |
-| `HTTP` | off (`127.0.0.1:7070` in daemon mode) |
+| `HTTP` | off |
 | `HTTP_TOKEN` | none (required for non-loopback bind) |
 | `STATE_FILE` | `./.diversity-classifier.json` |
 | `GLOBAL_STATE_FILE` | `$XDG_CONFIG_HOME/diversity-classifier/global.json` |
@@ -603,13 +611,13 @@ as constants in `src/config`:
 
 * Long-term storage and querying of historical logs (use Loki or Elastic).
 * Arbitrary JS in parsers. Converters are a fixed, safe set.
-* Multi-tenant (several isolated engines in one daemon).
+* Production deployment, daemon mode, or running inside an application.
+* Multi-tenant (several isolated engines in one process).
 * User accounts and roles in the web UI (single token only).
 
 ## 16. Project layout
 
 ```
-src/index.js              daemon entrypoint: web UI + REST + MCP Streamable HTTP (`yarn web`)
 bin/mcp.js                MCP stdio entrypoint (CLI flags, optional --http)
 src/config/               constants + env/CLI resolution
 src/patterns/             template compiler, built-in types, filters, parser registry
