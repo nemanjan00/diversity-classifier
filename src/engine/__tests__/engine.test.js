@@ -392,3 +392,20 @@ describe("shadowed top-level classifiers", () => {
 		engine.stop();
 	});
 });
+
+describe("routes as sub-classifiers", () => {
+	test("route children match the parent's path field; unmatched paths stay on the parent", () => {
+		const engine = makeEngine(tmpDir());
+		engine.defineClassifier({ name: "http", template: "{method:word} {path:pathname}{q?:qs} {status:int}" });
+		engine.defineClassifier({ name: "http.product", parent: "http", on: "path", template: "^/api/products/{id:int}$" });
+		engine.defineClassifier({ name: "http.search", parent: "http", on: "path", template: "^/api/search$" });
+		engine.ingestLines(["GET /api/products/42 200", "GET /api/search?q=shoes&page=3 200", "GET /about 200"], "web");
+
+		expect(engine.queries.search({ classifier: "http.product" }).events[0].fields.id).toBe(42);
+		expect(engine.queries.search({ q: "q.page >= 2" }).events[0].classifier).toBe("http.search");
+		expect(engine.queries.histogram({ classifier: "http", field: "classifier", exact: true }).values.map((v) => {
+			return v.value;
+		}).sort()).toEqual(["http", "http.product", "http.search"]);
+		engine.stop();
+	});
+});

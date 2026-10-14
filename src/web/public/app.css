@@ -159,6 +159,8 @@ a { color: inherit; }
 .dc-mark { background: color-mix(in oklch, var(--chart-1) 25%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
 .dc-line-raw .dc-mark { background: color-mix(in oklch, var(--chart-1) 12%, transparent); }
 .dc-mark-filter { cursor: pointer; }
+.dc-clickable svg { cursor: pointer; }
+.dc-cell:hover { stroke: var(--foreground); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .dc-mark-filter:hover { outline: 1px solid var(--chart-1); background: color-mix(in oklch, var(--chart-1) 35%, transparent); }
 .dc-paused { background: var(--chart-1); color: var(--primary-foreground); }
 .dc-kv { border-collapse: collapse; font-size: 12px; width: 100%; }

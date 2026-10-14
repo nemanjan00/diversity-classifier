@@ -238,7 +238,12 @@ const renderResult = (def, r) => {
 				}
 			});
 		case "heatmap":
-			return heatmapChart(r);
+			return heatmapChart(Object.assign({}, r, {
+				onCell: (tFrom, tTo, vFrom, vTo) => {
+					addFilter({ field: def.field, op: "range", from: vFrom, to: vTo });
+					setAbsoluteRange(tFrom, tTo);
+				}
+			}));
 		case "metric":
 			return renderMetric(def, r);
 		case "table":

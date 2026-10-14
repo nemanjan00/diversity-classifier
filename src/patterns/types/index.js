@@ -98,6 +98,37 @@ const parseKv = (text) => {
 	return out;
 };
 
+const decodeComponent = (text) => {
+	try {
+		return decodeURIComponent(text.replace(/\+/g, " "));
+	} catch (e) {
+		return text;
+	}
+};
+
+/** "?a=1&b=x%20y&b=2&flag" → { a: 1, b: ["x y", 2], flag: "" } */
+const parseQueryString = (text) => {
+	const out = {};
+	text.replace(/^\?/, "").split("&").filter(Boolean).forEach((pair) => {
+		const eq = pair.indexOf("=");
+		const key = decodeComponent(eq === -1 ? pair : pair.slice(0, eq));
+		const raw = eq === -1 ? "" : decodeComponent(pair.slice(eq + 1));
+		const value = /^-?\d+(\.\d+)?$/.test(raw) && raw.length < 16 ? parseFloat(raw) : raw;
+
+		if (!key) {
+			return;
+		}
+
+		if (Object.prototype.hasOwnProperty.call(out, key)) {
+			out[key] = [].concat(out[key], [value]);
+		} else {
+			out[key] = value;
+		}
+	});
+
+	return out;
+};
+
 const toNumber = (text) => {
 	const n = Number(text);
 	return isFinite(n) ? n : undefined;
@@ -285,6 +316,21 @@ const types = {
 			return "(?:\\.{0,2}/|~/)[^\\s\"'<>]*|[\\w.-]+(?:/[^\\s\"'<>]*)+";
 		},
 		convert: identity
+	},
+	pathname: {
+		description: "path without query string or fragment (pair with {q?:qs})",
+		regex: () => {
+			return "(?:\\.{0,2}/|~/)[^\\s\"'<>?#]*|[\\w.-]+(?:/[^\\s\"'<>?#]*)+";
+		},
+		convert: identity
+	},
+	qs: {
+		description: "URL query string (leading ? optional): a=1&b=x%20y → URL-decoded fields name.a, name.b; repeated keys become lists, numbers are converted",
+		object: true,
+		regex: () => {
+			return "\\?[^\\s#]*|[^\\s#?&=]+=[^\\s#&]*(?:&[^\\s#&=]+(?:=[^\\s#&]*)?)*";
+		},
+		convert: parseQueryString
 	},
 	iso8601: {
 		description: "ISO-8601 timestamp → epoch ms; iso8601(utc|local|±HH:MM) sets the zone for zone-less values (default local)",

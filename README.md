@@ -137,7 +137,7 @@ starts with the same definitions.
 {{ }}                       literal braces            whitespace runs match \s+, ^ and $ anchor
 ```
 
-**Built-in types:** `word text rest int float number hex bool uuid ip ipv4 ipv6 host port email url path iso8601 timestamp duration bytes level quoted json kv enum regex`.
+**Built-in types:** `word text rest int float number hex bool uuid ip ipv4 ipv6 host port email url path pathname qs iso8601 timestamp duration bytes level quoted json kv enum regex`.
 `duration` → ms, `bytes` → bytes, `timestamp` handles ISO, syslog, CLF and epoch
 → epoch ms, and `level` normalises `WARNING`/`W`/`warn` → `warn`. `json` and `kv`
 flatten into `name.key` fields.
@@ -149,6 +149,19 @@ and then `{peer:hostport}` → `peer.host`, `peer.port`.
 **Sub-classifiers** refine a parent's field: a `http` classifier with
 `{path:path}`, plus a child `http.admin` with `on: "path"` and template
 `^/admin/{section:word}`.
+
+**HTTP routes and query parameters.** `pathname` stops at `?`, and `qs`
+parses the query string (URL-decoded, repeated keys become lists, numbers are
+converted). One child per route gives you path variables; children are tried
+in priority order, and unmatched paths stay on the parent:
+
+```jsonc
+{ "name": "http", "template": "{method:word} {path:pathname}{q?:qs} {status:int} took={took:duration}" }
+{ "name": "http.product", "parent": "http", "on": "path", "template": "^/api/products/{id:int}$" }
+{ "name": "http.order_item", "parent": "http", "on": "path", "template": "^/api/orders/{order:uuid}/items/{item:int}$" }
+// GET /api/search?q=red+shoes&page=2 → path "/api/search", q.q "red shoes", q.page 2
+// per-route latency: timeseries { classifier: "http", split_by: "classifier", agg: "p90", field: "took" }
+```
 
 ## Stack traces behind prefixes
 
@@ -195,6 +208,10 @@ npx -y @nemanjan00/diversity-streamer --http 7070      # or let the agent call t
   Field values are highlighted in each line: click one to filter for it,
   Alt/Shift-click to exclude it. Opening an event pauses live mode until you
   resume.
+- **Click to filter everywhere**: bars, histogram buckets, table cells,
+  legend entries, a series inside a line/area/stacked chart, and heatmap
+  cells (value range + time). All panels on a page share the filters, so one
+  click narrows the whole dashboard. Drag across a time chart to zoom.
 - **Classifiers**: an explorer tree and per-classifier pages with one
   histogram and one over-time panel per field. Panels cross-filter: click
   `status=503` to see which hosts and latencies go with it. Also includes an

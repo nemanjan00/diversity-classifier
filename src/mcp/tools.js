@@ -38,7 +38,7 @@ const FILTER_PROPS = {
 
 const CLASSIFIER_PROPS = {
 	name: str("Unique name, e.g. 'nginx.access' or 'app.db.conn_failed'"),
-	template: str("Template: literal text + {field:type} captures. Types: word text rest int float hex bool uuid ip ipv4 ipv6 host port email url path iso8601 timestamp duration(→ms) bytes level quoted json kv enum(a,b) regex(..), or a parser name. {f:type|lower|map(a=b)} converters, {f?:type} optional, {f:/re/} inline regex, {_:type}/{*} skip, {...parser} spreads a template parser's fields. Whitespace matches any run; ^/$ anchor; {{ }} literal braces."),
+	template: str("Template: literal text + {field:type} captures. Types: word text rest int float hex bool uuid ip ipv4 ipv6 host port email url path pathname qs iso8601 timestamp duration(→ms) bytes level quoted json kv enum(a,b) regex(..), or a parser name. {f:type|lower|map(a=b)} converters, {f?:type} optional, {f:/re/} inline regex, {_:type}/{*} skip, {...parser} spreads a template parser's fields. Whitespace matches any run; ^/$ anchor; {{ }} literal braces."),
 	regex: str("Alternative to template: JS regex with named groups (use __ for dots: peer__host → peer.host)"),
 	flags: str("Regex flags for `regex`"),
 	types: obj("For `regex`: { field: builtinType } conversions"),

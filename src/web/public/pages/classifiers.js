@@ -186,7 +186,12 @@ const FieldPanel = (classifier, field, type) => {
 			}
 
 			if (numeric) {
-				return heatmapChart(Object.assign({ height: 70 }, r));
+				return heatmapChart(Object.assign({ height: 70 }, r, {
+					onCell: (tFrom, tTo, vFrom, vTo) => {
+						addFilter({ field, op: "range", from: vFrom, to: vTo });
+						setAbsoluteRange(tFrom, tTo);
+					}
+				}));
 			}
 
 			return timeChart({

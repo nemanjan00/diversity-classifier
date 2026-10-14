@@ -215,6 +215,57 @@ export const timeChart = (opts) => {
 		tooltip.style.display = "none";
 	});
 
+	/** Series under the pointer at bucket i: the stacked segment (bars) or the closest line. */
+	const seriesAt = (event, i) => {
+		const rect = plot.querySelector("svg").getBoundingClientRect();
+		const yFrac = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+		const value = (1 - yFrac) * maxY * (height / (height - 6));
+
+		if (type === "bar") {
+			let base = 0;
+			const hit = series.find((s) => {
+				base += s.values[i] || 0;
+				return value <= base;
+			});
+			return hit || null;
+		}
+
+		return series.filter((s) => {
+			return s.values[i] !== null && s.values[i] !== undefined;
+		}).reduce((best, s) => {
+			const d = Math.abs(s.values[i] - value);
+			return !best || d < best.d ? { s, d } : best;
+		}, null);
+	};
+
+	/** A click (no drag) inside the plot filters on the series under the pointer. */
+	const clickSeries = (event) => {
+		if (!opts.onSeries || series.length < 2) {
+			return;
+		}
+
+		const i = indexAt(fraction(event, plot));
+
+		if (i === -1) {
+			return;
+		}
+
+		const found = seriesAt(event, i);
+		const picked = found && found.s ? found.s : found;
+
+		if (picked && picked.key !== "other") {
+			opts.onSeries(picked.key);
+		}
+	};
+
+	if (opts.onSeries && series.length > 1) {
+		plot.classList.add("dc-clickable");
+	}
+
+	if (!opts.onBrush) {
+		plot.addEventListener("click", clickSeries);
+	}
+
 	if (opts.onBrush) {
 		plot.classList.add("dc-brushable");
 		plot.addEventListener("pointerdown", (event) => {
@@ -235,6 +286,8 @@ export const timeChart = (opts) => {
 
 			if (b - a > 0.01) {
 				opts.onBrush(from + a * span, from + b * span);
+			} else {
+				clickSeries(event);
 			}
 		});
 	}
@@ -377,20 +430,28 @@ export const heatmapChart = (opts) => {
 	}));
 	const cw = W / times.length;
 	const ch = height / rows;
+	const interval = opts.interval || (times.length > 1 ? times[1] - times[0] : 60000);
 	const rects = opts.cells.map((cell) => {
+		const tFrom = times[cell[0]];
+		const vFrom = bounds[cell[1]];
+		const vTo = bounds[cell[1] + 1];
 		return el("rect", {
 			x: cell[0] * cw,
 			y: height - (cell[1] + 1) * ch,
 			width: cw,
 			height: ch,
 			fill: colorFor(0),
-			"fill-opacity": String(0.15 + 0.85 * (cell[2] / max))
-		});
+			"fill-opacity": String(0.15 + 0.85 * (cell[2] / max)),
+			class: opts.onCell ? "dc-cell" : null,
+			onclick: opts.onCell ? () => {
+				opts.onCell(tFrom, tFrom + interval, vFrom, vTo);
+			} : null
+		}, el("title", {}, formatTime(tFrom) + " · " + formatNumber(vFrom) + "–" + formatNumber(vTo) + " · " + cell[2] + " events" + (opts.onCell ? "\nclick: filter to this range and time" : "")));
 	});
 
 	return el("div", { class: "dc-chart" },
 		el("div", { class: "dc-ymax" }, formatNumber(bounds[bounds.length - 1])),
-		el("div", { class: "dc-plot" }, svg(height, rects)),
+		el("div", { class: "dc-plot" + (opts.onCell ? " dc-clickable" : "") }, svg(height, rects)),
 		el("div", { class: "dc-axis dc-axis-ends" },
 			el("span", {}, formatTime(times[0])),
 			el("span", {}, "min " + formatNumber(bounds[0]) + (opts.scale === "log" ? " · log scale" : "")),

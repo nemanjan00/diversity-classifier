@@ -150,3 +150,22 @@ describe("timestamp zones", () => {
 		}).toThrow(/zone/);
 	});
 });
+
+describe("query strings and routes", () => {
+	test("qs decodes, converts numbers and collects repeated keys; pathname stops at ?", () => {
+		const patterns = createPatterns();
+		const compiled = patterns.compile("{method:word} {path:pathname}{q?:qs} {status:int}");
+
+		expect(compiled.match("GET /api/search?q=red+shoes&page=2&tag=a&tag=b%2Fc&flag 200").fields).toEqual({
+			method: "GET",
+			path: "/api/search",
+			"q.q": "red shoes",
+			"q.page": 2,
+			"q.tag": ["a", "b/c"],
+			"q.flag": "",
+			status: 200
+		});
+		expect(compiled.match("GET /api/products/42 200").fields).toEqual({ method: "GET", path: "/api/products/42", status: 200 });
+		expect(patterns.compile("params {p:qs}").match("params a=1&b=%E0%A4%A").fields).toEqual({ "p.a": 1, "p.b": "%E0%A4%A" });
+	});
+});

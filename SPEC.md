@@ -105,7 +105,9 @@ When `hostport` is a template parser, this match yields fields `ts`, `level`,
 | `ipv4`, `ipv6`, `ip` | addresses | string |
 | `host` | hostname or IP | string |
 | `port` | 1-65535 | number |
-| `email`, `url`, `path` | as named | string |
+| `email`, `url`, `path` | as named (`path` includes any query string) | string |
+| `pathname` | path without query string / fragment | string |
+| `qs` | URL query string, leading `?` optional; URL-decoded, `&`-separated, repeated keys → list, numbers converted | object, flattened to `name.key` |
 | `iso8601` | ISO-8601 timestamp; `iso8601(utc\|local\|±HH:MM)` sets the zone of zone-less values (default local) | epoch ms |
 | `timestamp` | ISO-8601, `YYYY-MM-DD HH:MM:SS[.fff]`, syslog `Mmm dd HH:MM:SS`, CLF, epoch s/ms; same zone argument | epoch ms |
 | `duration` | `250ms`, `1.5s`, `2m`, `1h30m`, `µs`/`us`/`ns` | ms (number) |
