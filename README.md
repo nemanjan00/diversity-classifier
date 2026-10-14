@@ -35,12 +35,13 @@ per-field histograms, timeseries, dashboards the agent can build for you.
 ## Quick start (Claude Code)
 
 ```sh
-git clone https://github.com/nemanjan00/diversity-classifier.git
-cd diversity-classifier && yarn install
-
-# in your project:
-claude mcp add logs -- node /path/to/diversity-classifier/bin/mcp.js
+# in your project (Node >= 20):
+claude mcp add logs -- npx -y @nemanjan00/diversity-streamer
 ```
+
+Published on npm as [`@nemanjan00/diversity-streamer`](https://www.npmjs.com/package/@nemanjan00/diversity-streamer).
+The state file is created in the directory Claude Code starts the server in,
+i.e. your project.
 
 Then ask: *"Watch the API logs on prod-1 (`ssh prod-1 journalctl -fu api -o short-iso`), classify what's there and alert me on anything unusual."*
 
@@ -137,7 +138,7 @@ counts.
 ## Web UI
 
 ```sh
-node bin/mcp.js --http 7070      # or let the agent call the web_ui tool
+npx -y @nemanjan00/diversity-streamer --http 7070      # or let the agent call the web_ui tool
 ```
 
 - **Discover**: query bar, time picker, live mode, a hits histogram, a field
@@ -158,7 +159,7 @@ step and it works offline.
 ## CLI
 
 ```
-node bin/mcp.js [options]
+npx -y @nemanjan00/diversity-streamer [options]
   --cmd "[name=]command"      --file "[name=]path"      --tcp "[name=][host:]port"      --unix "[name=]path"
   --state <path>              --global-state <path>     --no-global
   --http [host:]port          --token <secret>          --read-only
@@ -189,6 +190,10 @@ history.
 ## Development
 
 ```sh
+git clone https://github.com/nemanjan00/diversity-classifier.git
+cd diversity-classifier && yarn install   # dev tooling needs Node >= 22.18
+claude mcp add logs-dev -- node "$PWD/bin/mcp.js"
+
 yarn test        # jest
 yarn lint        # eslint
 yarn mcp-watch   # nodemon -q bin/mcp.js

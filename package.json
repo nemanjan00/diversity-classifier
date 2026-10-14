@@ -1,9 +1,10 @@
 {
-	"name": "diversity-classifier",
+	"name": "@nemanjan00/diversity-streamer",
 	"version": "0.1.0",
 	"description": "MCP server that lets an AI agent watch log streams cheaply: teach it templates, get only unknown lines, metrics and alarms",
 	"main": "src/engine/index.js",
 	"bin": {
+		"diversity-streamer": "bin/mcp.js",
 		"diversity-classifier": "bin/mcp.js"
 	},
 	"license": "MIT",
@@ -43,7 +44,7 @@
 		"prepare": "husky"
 	},
 	"engines": {
-		"node": ">=22"
+		"node": ">=20"
 	},
 	"files": [
 		"bin",
@@ -63,5 +64,12 @@
 	},
 	"lint-staged": {
 		"*.js": "eslint --fix"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"homepage": "https://github.com/nemanjan00/diversity-classifier#readme",
+	"bugs": {
+		"url": "https://github.com/nemanjan00/diversity-classifier/issues"
 	}
 }

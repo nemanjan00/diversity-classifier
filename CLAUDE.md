@@ -2,7 +2,7 @@
 
 MCP stdio server that an AI agent launches to watch log streams cheaply.
 SPEC.md is the source of truth for behaviour, and README.md is user-facing.
-Repo: github.com/nemanjan00/diversity-classifier (public, MIT).
+Repo: github.com/nemanjan00/diversity-classifier (public, MIT). npm package: `@nemanjan00/diversity-streamer` (run with `npx -y @nemanjan00/diversity-streamer`). Runtime supports Node >= 20; dev tooling needs >= 22.18.
 
 ## Always use the implement-js skill
 
