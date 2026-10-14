@@ -127,7 +127,13 @@ const createEngine = (options) => {
 		return { fields, raw: maskValues(raw, values) };
 	};
 
-	const recordEvent = (record, result, live) => {
+	/**
+	 * @param {object} record
+	 * @param {object} result classification result
+	 * @param {boolean} live fire alarms / emit
+	 * @param {string[]} [alreadyCounted] path nodes whose aggregates already include this record (moving an event)
+	 */
+	const recordEvent = (record, result, live, alreadyCounted) => {
 		const leaf = result.node;
 		const redacted = redactFields(result, record.raw);
 		const event = metrics.record({
@@ -140,7 +146,7 @@ const createEngine = (options) => {
 			fields: redacted.fields,
 			raw: redacted.raw,
 			assembled: record.assembled
-		}, leaf.def.store);
+		}, leaf.def.store, { alreadyCounted });
 
 		if (live) {
 			alarms.onEvent(event);
@@ -148,6 +154,66 @@ const createEngine = (options) => {
 		}
 
 		return event;
+	};
+
+	/**
+	 * Residual clustering (SPEC.md §6): a classifier with `residual: field`
+	 * whose children did not match sends that field's value to the queue as a
+	 * residual cluster. The event itself is already recorded on the classifier.
+	 */
+	const addResidual = (record, result, live) => {
+		const node = result.node;
+		const field = node.def.residual;
+
+		if (!field) {
+			return;
+		}
+
+		const value = result.fields[field];
+
+		if (value === undefined || value === null || value === "") {
+			return;
+		}
+
+		const entry = {
+			raw: record.raw,
+			t: record.t,
+			source: record.source,
+			labels: record.labels || {},
+			envelope: null,
+			body: null,
+			assembled: record.assembled,
+			residual: { classifier: node.name, field, value: String(value) }
+		};
+		const added = clusterer.add(entry);
+
+		if (live) {
+			notifier.touchDigest();
+			emitter.emit("residual", { record: entry, cluster: added.cluster.id, isNew: added.isNew });
+		}
+	};
+
+	/** Move a parent's stored events to children that now match them (new route defined). */
+	const rerouteEvents = (parentName) => {
+		const events = metrics.events([parentName]).filter((event) => {
+			return event.classifier === parentName && event.raw !== undefined;
+		});
+		const moved = {};
+
+		events.forEach((event) => {
+			const record = { raw: event.raw, t: event.ingest_t || event.t, source: event.source, labels: event.labels, assembled: event.assembled };
+			const result = classifyStored(record);
+
+			if (!result || !result.classified || result.node.name === parentName || result.path.indexOf(parentName) === -1) {
+				return;
+			}
+
+			metrics.removeEvents([event]);
+			recordEvent(record, result, false, event.path);
+			moved[result.node.name] = (moved[result.node.name] || 0) + 1;
+		});
+
+		return moved;
 	};
 
 	const recordUnclassified = (record, result, live) => {
@@ -299,6 +365,7 @@ const createEngine = (options) => {
 			perSource.classified++;
 			rates.classified.add(record.t);
 			recordEvent(record, result, true);
+			addResidual(record, result, true);
 			return;
 		}
 
@@ -330,9 +397,21 @@ const createEngine = (options) => {
 		const moved = [];
 		const byClassifier = new Map();
 		const sample = [];
+		const residualResolved = [];
 
 		clusterer.records().forEach((record) => {
 			const result = classifyStored(record);
+
+			if (record.residual) {
+				const stillResidual = result && result.classified && result.node.name === record.residual.classifier &&
+					result.node.def.residual === record.residual.field;
+
+				if (!stillResidual) {
+					residualResolved.push(record);
+				}
+
+				return;
+			}
 
 			if (result && result.classified) {
 				absorbed.push({ record, leaf: result.node.name });
@@ -356,6 +435,7 @@ const createEngine = (options) => {
 			}
 		});
 
+		const residualSummary = residualResolved.length ? clusterer.absorb(residualResolved) : [];
 		const fromClusters = clusterer.absorb(absorbed.map((item) => {
 			return item.record;
 		}));
@@ -409,6 +489,12 @@ const createEngine = (options) => {
 				return { id: summary.id, shape: summary.shape.slice(0, DIGEST_SHAPE_MAX), matched: summary.matched, remaining: summary.remaining, backlog: summary.backlog || undefined };
 			}),
 			reclustered_under_envelope: moved.length || undefined,
+			residual_resolved: residualResolved.length ? {
+				records: residualResolved.length,
+				clusters: residualSummary.filter((summary) => {
+					return summary.deleted;
+				}).length
+			} : undefined,
 			backlog: backlog || undefined,
 			sample,
 			queue: { before, after }
@@ -782,6 +868,8 @@ const createEngine = (options) => {
 				reprocessed = reclassifyEvents(classifiers.subtree(def.name));
 			}
 
+			const parentNode = def.parent ? classifiers.get(def.parent) : null;
+			const rerouted = parentNode && !parentNode.def.envelope ? rerouteEvents(def.parent) : null;
 			const retro = reclassifyQueue();
 			definitionsChanged("classifier", def.name, context);
 			const node = classifiers.get(def.name);
@@ -796,6 +884,7 @@ const createEngine = (options) => {
 				fields: classifiers.fieldTypes(def.name),
 				prefilter_literal: node.compiled.literal || null,
 				reprocessed_events: reprocessed || undefined,
+				moved_from_parent: rerouted && Object.keys(rerouted).length ? rerouted : undefined,
 				retro
 			};
 		},
@@ -1028,6 +1117,12 @@ const createEngine = (options) => {
 
 					check();
 				};
+				listeners.residual = (info) => {
+					if (info.isNew) {
+						seen.new_clusters.push(info.cluster);
+						check();
+					}
+				};
 				listeners.event = (event) => {
 					seen.records++;
 
@@ -1130,14 +1225,15 @@ const createEngine = (options) => {
 				since: parseTime(a.since),
 				source: a.source,
 				min_count: a.min_count,
-				envelope: a.envelope
+				envelope: a.envelope,
+				kind: a.kind
 			});
 			const limit = a.limit || 20;
 			const offset = a.cursor ? parseInt(a.cursor, 10) || 0 : 0;
 			const stats = clusterer.stats();
 
 			return {
-				queue: { clusters: list.length, records: stats.pending, buffered: stats.buffered, evicted_records: stats.evicted_records || undefined, evicted_clusters: stats.evicted_clusters || undefined },
+				queue: { clusters: list.length, records: stats.pending, residual_records: stats.residual || undefined, buffered: stats.buffered, evicted_records: stats.evicted_records || undefined, evicted_clusters: stats.evicted_clusters || undefined },
 				clusters: list.slice(offset, offset + limit).map((cluster) => {
 					const described = clusterer.describe(cluster);
 
@@ -1164,6 +1260,19 @@ const createEngine = (options) => {
 			}
 
 			const described = clusterer.describe(cluster);
+
+			if (cluster.residual) {
+				return engine.defineClassifier({
+					name: "ignore." + id,
+					parent: cluster.residual.classifier,
+					on: cluster.residual.field,
+					template: described.suggested_template,
+					description: "ignored residual " + cluster.residual.field + ": " + cluster.shape.slice(0, 100),
+					tags: ["ignore"],
+					scope: scope || "project"
+				}, context);
+			}
+
 			const def = {
 				name: "ignore." + id,
 				template: described.suggested_template,
@@ -1231,6 +1340,7 @@ const createEngine = (options) => {
 				queue: {
 					clusters: queue.clusters,
 					records: queue.pending,
+					residual_records: queue.residual || undefined,
 					buffered: queue.buffered,
 					evicted: queue.evicted_records || undefined,
 					top: clusterer.list({ sort: "count" }).slice(0, 5).map((cluster) => {
@@ -1494,7 +1604,8 @@ const createEngine = (options) => {
 		const lines = report.slice(0, DIGEST_TOP).map((cluster) => {
 			const shape = cluster.shape.length > DIGEST_SHAPE_MAX ? cluster.shape.slice(0, DIGEST_SHAPE_MAX) + "…" : cluster.shape;
 			const tag = cluster.notifiedCount === cluster.count && fresh.indexOf(cluster) !== -1 ? "new" : "grew";
-			return "  [" + cluster.id + "] " + tag + " ×" + cluster.count + (cluster.envelope ? " (" + cluster.envelope + ")" : "") + "  " + shape;
+			const where = cluster.residual ? " (" + cluster.residual.classifier + " · unmatched " + cluster.residual.field + ")" : (cluster.envelope ? " (" + cluster.envelope + ")" : "");
+			return "  [" + cluster.id + "] " + tag + " ×" + cluster.count + where + "  " + shape;
 		});
 		const more = report.length > DIGEST_TOP ? "\n  … and " + (report.length - DIGEST_TOP) + " more" : "";
 		const header = "Unclassified: " + fresh.length + " new, " + grown.length + " grown cluster(s). Queue: " +

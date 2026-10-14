@@ -263,7 +263,7 @@ const DetailView = () => {
 			return SKIP_PANEL_TYPES.indexOf(fields[f]) === -1 && !(c.envelope && f === c.body);
 		});
 
-		return el("div", {},
+		return el("div", { class: "dc-stack" },
 			el("div", { class: "dc-page-head" },
 				el("a", { href: hrefFor("classifiers"), class: "dc-back" }, "← Classifiers"),
 				el("h1", {}, c.name),

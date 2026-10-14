@@ -41,6 +41,14 @@ const normalise = (def) => {
 		new RegExp(def.multiline.start || def.multiline.continue);
 	}
 
+	if (def.residual && def.envelope) {
+		throw new Error("residual is for regular classifiers; an envelope already sends unmatched bodies to the queue");
+	}
+
+	if (def.residual && typeof def.residual !== "string") {
+		throw new Error("residual must be a field name (e.g. \"path\")");
+	}
+
 	if (def.redact && !Array.isArray(def.redact)) {
 		throw new Error("redact must be a list of field names");
 	}
@@ -66,6 +74,7 @@ const normalise = (def) => {
 			max_lines: def.multiline.max_lines || 500
 		} : null,
 		redact: def.redact && def.redact.length ? def.redact.slice() : null,
+		residual: def.residual || null,
 		scope: def.scope || "project"
 	};
 
@@ -84,9 +93,9 @@ const normalise = (def) => {
 const serialise = (def) => {
 	const out = { name: def.name };
 	const keys = ["template", "regex", "flags", "types", "description", "priority", "sources", "time_field",
-		"store", "tags", "parent", "on", "envelope", "body", "multiline", "redact", "enabled"];
+		"store", "tags", "parent", "on", "envelope", "body", "multiline", "redact", "residual", "enabled"];
 	const defaults = { description: "", priority: 0, sources: null, time_field: null, store: "full", parent: null,
-		on: null, envelope: false, body: null, enabled: true, flags: "", multiline: null, redact: null };
+		on: null, envelope: false, body: null, enabled: true, flags: "", multiline: null, redact: null, residual: null };
 
 	keys.forEach((key) => {
 		const value = def[key];

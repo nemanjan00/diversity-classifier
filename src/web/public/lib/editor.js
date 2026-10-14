@@ -277,7 +277,7 @@ export const ClassifierEditor = () => {
 					return editor.editing;
 				} })),
 				field("Template", Textarea({ bind: [editor.def, "template"], rows: 4, class: "dc-mono", spellcheck: false }),
-					"{field:type} captures; types: word text rest int float hex bool uuid ip host port url path timestamp duration bytes level quoted json kv enum(a,b) regex(..) or a parser; {...head} spreads a parser."),
+					"{field:type} captures; types: word text rest int float hex bool uuid ip host port url path pathname qs timestamp duration bytes level quoted json kv enum(a,b) regex(..) or a parser; {...head} spreads a parser."),
 				() => {
 					return d().template ? templateView(d().template) : null;
 				},

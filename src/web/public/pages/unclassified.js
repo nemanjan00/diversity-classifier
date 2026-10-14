@@ -33,6 +33,11 @@ const suggestName = (cluster) => {
 		return w.toLowerCase();
 	});
 	const base = words.length ? words.join("_") : "cluster_" + cluster.id;
+
+	if (cluster.residual) {
+		return cluster.residual.classifier + "." + base;
+	}
+
 	return (cluster.envelope ? cluster.envelope + "." : "") + base;
 };
 
@@ -58,6 +63,7 @@ const ClusterCard = (cluster) => {
 		el("div", { class: "dc-cluster-meta" },
 			Badge({ variant: "outline" }, cluster.id),
 			cluster.envelope ? Badge({ variant: "secondary" }, "under " + cluster.envelope) : null,
+			cluster.residual ? Badge({ variant: "outline", title: "Classified as " + cluster.residual.classifier + ", but its " + cluster.residual.field + " matched none of its children" }, cluster.residual.classifier + " · unmatched " + cluster.residual.field) : null,
 			el("span", { class: "dc-muted" }, total + " source(s): " + Object.keys(cluster.sources || {}).map((s) => {
 				return s + " ×" + formatNumber(cluster.sources[s]);
 			}).join(", ")),
@@ -75,6 +81,11 @@ const ClusterCard = (cluster) => {
 				ignore(cluster.id);
 			} }, "Ignore"),
 			live.readOnly ? null : Button({ size: "sm", onclick: () => {
+				if (cluster.residual) {
+					openEditor({ name: suggestName(cluster), template: cluster.suggested_template, parent: cluster.residual.classifier, on: cluster.residual.field }, { cluster: cluster.id });
+					return;
+				}
+
 				openEditor({ name: suggestName(cluster), template: cluster.suggested_template, parent: cluster.envelope || "" }, { cluster: cluster.id });
 			} }, "Classify")),
 		when(() => {
@@ -100,7 +111,8 @@ export const UnclassifiedPage = () => {
 			el("h1", {}, "Unclassified"),
 			() => {
 				const q = data.data ? data.data.queue : null;
-				return q ? el("span", { class: "dc-muted" }, formatNumber(q.clusters) + " clusters · " + formatNumber(q.records) + " records" +
+				return q ? el("span", { class: "dc-muted" }, formatNumber(q.clusters) + " clusters · " + formatNumber(q.records) + " unclassified records" +
+					(q.residual_records ? " · " + formatNumber(q.residual_records) + " with an unmatched field" : "") +
 					(q.evicted_records ? " · " + formatNumber(q.evicted_records) + " evicted (queue overflowed)" : "")) : null;
 			},
 			el("span", { class: "dc-spacer" }),
@@ -110,7 +122,7 @@ export const UnclassifiedPage = () => {
 			NativeSelectOption({ value: "count" }, "Biggest first"),
 			NativeSelectOption({ value: "recent" }, "Most recent"),
 			NativeSelectOption({ value: "new" }, "Newest clusters"))),
-		el("p", { class: "dc-muted" }, "Records no classifier matches, grouped by shape. Classify the biggest clusters first; every classifier you save absorbs matching records immediately."),
+		el("p", { class: "dc-muted" }, "Records no classifier matches, grouped by shape, plus residual clusters (classified, but a field such as a path matched none of the children). Classify the biggest clusters first; every classifier you save absorbs matching records immediately."),
 		() => {
 			if (data.error) {
 				return el("div", { class: "dc-error" }, data.error);

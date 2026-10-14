@@ -124,7 +124,7 @@ const DashboardView = (views) => {
 			byName[v.name] = v;
 		});
 
-		return el("div", {},
+		return el("div", { class: "dc-stack" },
 			el("div", { class: "dc-page-head" },
 				el("a", { href: hrefFor("dashboards"), class: "dc-back" }, "← Dashboards"),
 				el("h1", {}, dash.title || dash.name),

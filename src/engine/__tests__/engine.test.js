@@ -409,3 +409,54 @@ describe("routes as sub-classifiers", () => {
 		engine.stop();
 	});
 });
+
+describe("residual clustering (new routes)", () => {
+	test("unmatched paths surface as residual clusters; defining the route moves events and clears them", () => {
+		const engine = makeEngine(tmpDir());
+		const notes = [];
+		engine.notifier.addSink((note) => {
+			notes.push(note);
+		});
+		engine.defineClassifier({ name: "http", template: "{method:word} {path:pathname}{q?:qs} {status:int}", residual: "path" });
+		engine.defineClassifier({ name: "http.product", parent: "http", on: "path", template: "^/api/products/{id:int}$" });
+		engine.ingestLines([
+			"GET /api/products/1 200",
+			"GET /api/reports/7/export 200",
+			"GET /api/reports/8/export?fmt=csv 500",
+			"GET /api/reports/9/export 200"
+		], "web");
+		engine.flush();
+
+		expect(engine.queries.count({ classifier: "http" }).total).toBe(4);
+		const queue = engine.getUnclassified({ kind: "residual" });
+		expect(queue.clusters.length).toBe(1);
+		expect(queue.clusters[0]).toMatchObject({ kind: "residual", count: 3, shape: "/api/reports/<num>/export", residual: { classifier: "http", field: "path" } });
+		expect(queue.clusters[0].suggested_template).toBe("^/api/reports/{report:int}/export$");
+		expect(engine.stats().queue.records).toBe(0);
+		expect(notes.some((note) => {
+			return /http · unmatched path/.test(note.content);
+		})).toBe(true);
+
+		const route = engine.defineClassifier({ name: "http.report_export", parent: "http", on: "path", template: "^/api/reports/{report:int}/export$" });
+		expect(route.moved_from_parent).toEqual({ "http.report_export": 3 });
+		expect(route.retro.residual_resolved).toEqual({ records: 3, clusters: 1 });
+		expect(engine.getUnclassified({ kind: "residual" }).clusters.length).toBe(0);
+		expect(engine.queries.count({ classifier: "http.report_export" }).total).toBe(3);
+		expect(engine.listClassifiers({ classifier: "http" }).classifiers.find((c) => {
+			return c.name === "http";
+		}).count).toBe(4);
+		engine.stop();
+	});
+
+	test("ignoring a residual cluster keeps the events", () => {
+		const engine = makeEngine(tmpDir());
+		engine.defineClassifier({ name: "http", template: "{method:word} {path:pathname} {status:int}", residual: "path" });
+		engine.ingestLines(["GET /favicon.ico 404", "GET /favicon.ico 404"], "web");
+		const cluster = engine.getUnclassified({ kind: "residual" }).clusters[0];
+		const result = engine.ignoreCluster(cluster.id);
+		expect(result.moved_from_parent).toEqual({ ["ignore." + cluster.id]: 2 });
+		expect(engine.getUnclassified({}).clusters.length).toBe(0);
+		expect(engine.queries.count({ classifier: "http" }).total).toBe(2);
+		engine.stop();
+	});
+});

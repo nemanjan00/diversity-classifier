@@ -107,7 +107,12 @@ export const timeChart = (opts) => {
 
 				const y0 = yOf(base);
 				const y1 = yOf(base + v);
-				shapes.push(el("rect", { x: xOf(t), y: y1, width: barW, height: Math.max(0.5, y0 - y1), fill: colorFor(si) }));
+				const x = Math.max(0, xOf(t));
+				const width = Math.min(barW, W - x);
+
+				if (width > 0) {
+					shapes.push(el("rect", { x, y: y1, width, height: Math.max(0.5, y0 - y1), fill: colorFor(si) }));
+				}
 				base += v;
 			});
 		});

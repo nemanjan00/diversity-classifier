@@ -328,6 +328,19 @@ to drive it to zero. The following operations maintain this invariant:
   stays clean.
 * **Envelope-only matches** stay in the queue, clustered by body (section 5.4).
   Only a leaf classification removes a record from the queue.
+* **Residual clusters** (opt-in, `residual: "<field>"` on a classifier): when
+  none of the classifier's children match, the line is still recorded as an
+  event of that classifier, *and* the field's value goes to the queue as a
+  separate, clearly marked kind of cluster ("classified, but this field
+  matched no child"). Typical use: HTTP logs with one child per route, where
+  `residual: "path"` makes new routes appear as clusters. Path values are
+  masked segment by segment (`/api/reports/<num>/export`), and the suggested
+  template is a ready, anchored child named after the previous segment
+  (`^/api/reports/{report:int}/export$`). Defining that child moves the
+  parent's stored matching events to it (counters are not doubled) and
+  resolves the residual cluster. `ignore_cluster` on a residual cluster
+  defines a regular child (events kept) tagged `ignore`. Residual records never
+  count as unclassified in `stats`.
 * **Eviction.** When the buffer or cluster cap is hit, the oldest records or
   clusters are evicted and counted in `stats.unclassified.evicted`, so the
   agent knows the queue overflowed. Records are never silently reclassified.

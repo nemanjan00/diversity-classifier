@@ -69,18 +69,43 @@ const mask = (text) => {
 };
 
 /**
+ * Mask a path segment by segment (route discovery): literal segments stay,
+ * variable ones become placeholders. "/api/reports/7/export" → "/api/reports/<num>/export".
+ */
+const maskPath = (text) => {
+	const values = [];
+	const shape = text.split("/").map((segment) => {
+		if (!segment) {
+			return segment;
+		}
+
+		const masked = mask(segment);
+		Array.prototype.push.apply(values, masked.values);
+		return masked.shape;
+	}).join("/");
+
+	return { shape, values };
+};
+
+/**
  * Turn a masked shape into a starting template: placeholders become typed
  * captures, named from a preceding "key=" / "key:" when present.
  * Numbers that are always integers in the examples become int.
  */
-const suggestTemplate = (shape, examples) => {
+/**
+ * @param {string} shape
+ * @param {string[]} examples
+ * @param {{ path?: boolean }} [options] path: shapes from maskPath (re-mask examples per segment, name vars after the previous segment)
+ */
+const suggestTemplate = (shape, examples, options) => {
+	const pathMode = !!(options && options.path);
 	const used = {};
 	let counter = 0;
 	const truncated = shape.slice(-1) === "…";
 	const base = truncated ? shape.slice(0, -1) : shape;
 
 	const exampleValues = (examples || []).map((example) => {
-		return mask(example).values;
+		return pathMode ? maskPath(example).values : mask(example).values;
 	});
 
 	const placeholderRe = /<(str|uuid|ts|url|ip|email|path|hex|id|dur|bytes|num)>/g;
@@ -90,6 +115,17 @@ const suggestTemplate = (shape, examples) => {
 	let m = placeholderRe.exec(base);
 
 	const nameFor = (before, type) => {
+		const segment = pathMode ? /\/([A-Za-z_][\w-]*)\/$/.exec(before) : null;
+
+		if (segment) {
+			const singular = segment[1].replace(/ies$/, "y").replace(/([^s])s$/, "$1").replace(/[.-]/g, "_").toLowerCase();
+
+			if (!used[singular]) {
+				used[singular] = 1;
+				return singular;
+			}
+		}
+
 		const key = /([A-Za-z_][\w.-]*)\s*[=:]\s*["']?$/.exec(before);
 		const short = { timestamp: "ts", quoted: "str", duration: "took", number: "num", float: "num", int: "num" };
 		const raw = key ? key[1].replace(/[.-]/g, "_").toLowerCase() : (short[type] || type) + "_" + (++counter);
@@ -134,6 +170,7 @@ const suggestTemplate = (shape, examples) => {
 
 module.exports = {
 	mask,
+	maskPath,
 	suggestTemplate,
 	MASKS
 };

@@ -163,6 +163,20 @@ in priority order, and unmatched paths stay on the parent:
 // per-route latency: timeseries { classifier: "http", split_by: "classifier", agg: "p90", field: "took" }
 ```
 
+**New routes surface on their own.** Add `"residual": "path"` to the `http`
+classifier. Requests that match no route child still count as `http` events,
+and their paths are also clustered in the queue as *residual* clusters:
+
+```
+[3f2a91c0] new ×412 (http · unmatched path)  /api/reports/<num>/export
+  suggested_template: ^/api/reports/{report:int}/export$
+```
+
+Defining that child (parent `http`, `on: "path"`) moves the matching stored
+events onto the new route and clears the cluster. The digest also reports new
+residual clusters, so the agent hears about a new route as soon as it
+shows up.
+
 ## Stack traces behind prefixes
 
 When every line carries a prefix (container, task, pod, worker), put the

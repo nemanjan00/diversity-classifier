@@ -1,6 +1,7 @@
 const createRingBuffer = require("../utils/ring-buffer").createRingBuffer;
 const shortHash = require("../utils/hash").shortHash;
 const mask = require("./mask").mask;
+const maskPath = require("./mask").maskPath;
 const suggestTemplate = require("./mask").suggestTemplate;
 
 const FIRST_EXAMPLES = 2;
@@ -62,7 +63,9 @@ const createClusterer = (options) => {
 	const exampleOf = (record) => {
 		const out = { t: record.t, source: record.source, raw: record.raw };
 
-		if (record.envelope) {
+		if (record.residual) {
+			out.body = String(record.residual.value);
+		} else if (record.envelope) {
 			out.body = record.body;
 		}
 
@@ -76,10 +79,11 @@ const createClusterer = (options) => {
 		 * @returns {{ cluster: object, isNew: boolean }}
 		 */
 		add: (record) => {
-			const text = record.envelope ? (record.body || "") : record.raw;
-			const masked = mask(text);
+			const text = record.residual ? String(record.residual.value) : (record.envelope ? (record.body || "") : record.raw);
+			const masked = record.residual && text.indexOf("/") !== -1 ? maskPath(text) : mask(text);
 			const envelopeName = record.envelope ? record.envelope.name : "";
-			const key = envelopeName + "\u0001" + masked.shape;
+			const residualKey = record.residual ? "residual\u0002" + record.residual.classifier + "\u0002" + record.residual.field : "";
+			const key = (residualKey || envelopeName) + "\u0001" + masked.shape;
 			const id = shortHash(key);
 			let cluster = clusters.get(id);
 			const isNew = !cluster;
@@ -89,7 +93,8 @@ const createClusterer = (options) => {
 					id,
 					key,
 					shape: masked.shape,
-					envelope: envelopeName || null,
+					envelope: record.residual ? null : (envelopeName || null),
+					residual: record.residual ? { classifier: record.residual.classifier, field: record.residual.field } : null,
 					count: 0,
 					buffered: 0,
 					first_seen: record.t,
@@ -210,18 +215,22 @@ const createClusterer = (options) => {
 				spark.push(cluster.spark.get(minute) || 0);
 			}
 
+			const suggested = suggestTemplate(cluster.shape, exampleTexts, { path: !!(cluster.residual && cluster.shape.indexOf("/") !== -1) });
+
 			return {
 				id: cluster.id,
+				kind: cluster.residual ? "residual" : "unclassified",
 				count: cluster.count,
 				shape: cluster.shape,
 				envelope: cluster.envelope,
+				residual: cluster.residual || undefined,
 				first_seen: new Date(cluster.first_seen).toISOString(),
 				last_seen: new Date(cluster.last_seen).toISOString(),
 				sources: cluster.sources,
 				labels: cluster.labels,
 				buffered: cluster.buffered,
 				spark_30m: spark,
-				suggested_template: suggestTemplate(cluster.shape, exampleTexts),
+				suggested_template: cluster.residual ? "^" + suggested + "$" : suggested,
 				examples: extraExamples ? extra : examples
 			};
 		},
@@ -262,6 +271,14 @@ const createClusterer = (options) => {
 						return false;
 					}
 
+					if (q.kind === "residual" && !cluster.residual) {
+						return false;
+					}
+
+					if (q.kind === "unclassified" && cluster.residual) {
+						return false;
+					}
+
 					return !q.test || q.test(cluster);
 				})
 				.sort(sorters[q.sort || "count"] || sorters.count);
@@ -272,8 +289,14 @@ const createClusterer = (options) => {
 				clusters: clusters.size,
 				buffered: buffer.length(),
 				pending: clusterer.all().reduce((acc, cluster) => {
-					return acc + cluster.count;
+					return cluster.residual ? acc : acc + cluster.count;
 				}, 0),
+				residual: clusterer.all().reduce((acc, cluster) => {
+					return cluster.residual ? acc + cluster.count : acc;
+				}, 0),
+				residual_clusters: clusterer.all().filter((cluster) => {
+					return cluster.residual;
+				}).length,
 				total_seen: counters.total,
 				evicted_records: counters.evictedRecords,
 				evicted_clusters: counters.evictedClusters

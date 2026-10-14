@@ -53,6 +53,7 @@ const CLASSIFIER_PROPS = {
 	envelope: bool("Envelope: captures a common line head + body; records matching only the envelope stay unclassified and are clustered by body. Attach real classifiers as children."),
 	body: str("Envelope body field (default 'msg'); must be captured, typically {msg:rest}"),
 	multiline: obj("Envelope only: join continuation lines (stack traces) by their BODY, after the head is stripped: { continue: '^\\s+at |^\\s' } or { start: '^[A-Z]\\w+Error|^\\S' }, group_by: ['task'] (envelope fields that identify one interleaved stream), flush_ms (default 300). The joined record is classified as one; {x:rest} spans lines."),
+	residual: str("Field (e.g. 'path') whose value goes to the unclassified queue as a 'residual' cluster when none of this classifier's children match. The event still counts here; the residual cluster's suggested_template is a ready child (use parent: this, on: field). Typical: HTTP logs with one child per route, so new routes surface as clusters."),
 	redact: { type: "array", items: { type: "string" }, description: "Fields whose values are masked as [REDACTED] in stored events and in the raw line (prefix match: 'auth' covers auth.*)" },
 	enabled: bool("Default true"),
 	scope: { type: "string", enum: ["project", "global"], description: "Which state file to persist to (default project; global = shared across projects)" }
@@ -93,6 +94,7 @@ const TOOLS = [
 			source: str("Only clusters seen on this source"),
 			min_count: num("Minimum count"),
 			envelope: str("Only clusters under this envelope classifier"),
+			kind: { type: "string", enum: ["unclassified", "residual"], description: "Only lines nothing matches, or only residual clusters (classified, but a field matched no child)" },
 			verbose: bool("Include sparkline, labels and full examples")
 		}),
 		handler: (engine, args) => {

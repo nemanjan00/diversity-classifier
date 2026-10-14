@@ -131,12 +131,18 @@ const createMetrics = (options) => {
 		 * event: { t, source, labels, classifier, path, fields, raw? }
 		 * @returns {object} the stored event (with id)
 		 */
-		record: (input, store) => {
+		record: (input, store, options) => {
 			const event = Object.assign({ id: counters.nextId++ }, input);
-			counters.events++;
+			const alreadyCounted = options && options.alreadyCounted ? options.alreadyCounted : [];
+
+			if (!alreadyCounted.length) {
+				counters.events++;
+			}
 
 			event.path.forEach((name) => {
-				updateStats(statsFor(name), event);
+				if (alreadyCounted.indexOf(name) === -1) {
+					updateStats(statsFor(name), event);
+				}
 			});
 
 			if (store === "count") {
