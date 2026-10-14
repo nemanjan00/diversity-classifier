@@ -142,6 +142,7 @@ const TOOLS = [
 		inputSchema: schema({
 			classifier: strOrList("Filter by name/glob"),
 			with_fields: bool("Include field → type map"),
+			spark: bool("Include per-minute counts for the last 60 minutes"),
 			verbose: bool("Include descriptions")
 		}),
 		handler: (engine, args) => {
@@ -210,6 +211,14 @@ const TOOLS = [
 		})),
 		handler: (engine, args) => {
 			return engine.queries.search(args);
+		}
+	},
+	{
+		name: "count",
+		description: "Count matching retained events (cheap; no event payloads).",
+		inputSchema: schema(FILTER_PROPS),
+		handler: (engine, args) => {
+			return engine.queries.count(args);
 		}
 	},
 	{

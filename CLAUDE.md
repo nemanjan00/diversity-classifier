@@ -35,6 +35,7 @@ approved deviations:
   the `includes()` prefilter. Never take it from optional parts.
 - Every event has `t` (event time: `time_field` if set, else ingest) and
   `ingest_t`. Queries filter on `t`.
+- **Web UI** (`src/web/public/`): `main.js` → `lib/` (api, view = URL-synced hash state, live = SSE, charts = inline SVG, shell, editor, viz) and one module per page in `pages/`. Import everything from the single qrp-shadcdn bundle (one qrp core). No external URLs, so it works offline.
 - Module layout: one folder per module with `index.js`, and tests in
   `__tests__/` beside it.
 
