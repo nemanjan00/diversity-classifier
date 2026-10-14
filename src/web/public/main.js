@@ -1,4 +1,4 @@
-import { mount, Toaster } from "@nemanjan00/qrp-shadcdn";
+import { mount, router, Toaster } from "@nemanjan00/qrp-shadcdn";
 import { startUrlSync } from "./lib/view.js";
 import { startLive } from "./lib/live.js";
 import { Shell, initTheme } from "./lib/shell.js";
@@ -23,9 +23,13 @@ initTheme();
 startUrlSync();
 startLive();
 
-mount(document.getElementById("app"), () => {
-	return Shell(PAGES, ClassifierEditor);
-});
+// One catch-all route: the router gives HTML5 history, link interception and
+// popstate; the shell stays mounted and reacts to `view` (lib/view.js).
+router({
+	"/*": () => {
+		return Shell(PAGES, ClassifierEditor);
+	}
+}, document.getElementById("app"), { transitions: false });
 
 mount(document.getElementById("toasts"), () => {
 	return Toaster({ position: "bottom-right", richColors: true, closeButton: true });

@@ -445,7 +445,7 @@ const UnclassifiedView = () => {
 					expanded[r.key] = !expanded[r.key];
 				} },
 				el("span", { class: "dc-time" }, formatTime(Date.parse(r.t), true)),
-				el("a", { class: "dc-cluster-link", href: "#/unclassified", title: "Open the unclassified queue" }, r.cluster),
+				el("a", { class: "dc-cluster-link", href: "/unclassified", title: "Open the unclassified queue" }, r.cluster),
 				el("span", { class: "dc-line-raw" }, r.raw)),
 				when(() => {
 					return expanded[r.key];

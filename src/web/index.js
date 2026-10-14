@@ -289,6 +289,14 @@ const createWeb = (engine, options) => {
 			return;
 		}
 
+		const isAsset = pathname.indexOf("/vendor/") === 0 || pathname.indexOf("/app/") === 0;
+
+		if (!isAsset) {
+			// HTML5 history routes (/discover, /classifiers/<name>, ...) all serve the app shell.
+			sendFile(res, path.join(PUBLIC_DIR, "index.html"));
+			return;
+		}
+
 		const mounts = [
 			["/vendor/qrp/", QRP_DIST],
 			["/vendor/qrp-shadcdn/", SHADCDN_DIST],

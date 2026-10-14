@@ -324,7 +324,7 @@ const Nav = () => {
 export const Shell = (pages, editorComponent) => {
 	return el("div", { class: "dc-app" },
 		el("header", { class: "dc-header" },
-			el("a", { class: "dc-brand", href: "#/discover" }, "diversity", el("span", {}, "classifier")),
+			el("a", { class: "dc-brand", href: "/discover" }, "diversity", el("span", {}, "classifier")),
 			Nav(),
 			Status()),
 		el("div", { class: "dc-toolbar" }, QueryBar(), TimePicker()),

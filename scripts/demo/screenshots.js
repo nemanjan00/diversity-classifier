@@ -28,11 +28,11 @@ const CHROME_CANDIDATES = ["google-chrome-stable", "google-chrome", "chromium", 
 const MIN_RECORDS = 30000;
 
 const SHOTS = [
-	{ file: "discover.png", hash: "#/discover?range=1h&stack=classifier", wait: 3500 },
-	{ file: "classifier.png", hash: "#/classifiers/shop.http?range=1h", wait: 4500 },
-	{ file: "dashboard.png", hash: "#/dashboards/shop-overview?range=1h", wait: 4500 },
-	{ file: "unclassified.png", hash: "#/unclassified", wait: 2500 },
-	{ file: "dashboard-dark.png", hash: "#/dashboards/shop-overview?range=1h", wait: 4500, dark: true }
+	{ file: "discover.png", hash: "/discover?range=1h&stack=classifier", wait: 3500 },
+	{ file: "classifier.png", hash: "/classifiers/shop.http?range=1h", wait: 4500 },
+	{ file: "dashboard.png", hash: "/dashboards/shop-overview?range=1h", wait: 4500 },
+	{ file: "unclassified.png", hash: "/unclassified", wait: 2500 },
+	{ file: "dashboard-dark.png", hash: "/dashboards/shop-overview?range=1h", wait: 4500, dark: true }
 ];
 
 const sleep = (ms) => {
@@ -193,7 +193,7 @@ const capture = (browser, shot) => {
 			return browser.send("Page.navigate", { url: "about:blank" });
 		})
 		.then(() => {
-			return browser.send("Page.navigate", { url: BASE + "/" + shot.hash });
+			return browser.send("Page.navigate", { url: BASE + shot.hash });
 		})
 		.then(() => {
 			return sleep(shot.wait);

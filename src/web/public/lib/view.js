@@ -1,9 +1,11 @@
-import { state, effect, batch, untracked } from "@nemanjan00/qrp-shadcdn";
+import { state, effect, batch, untracked, navigate } from "@nemanjan00/qrp-shadcdn";
 
 /*
  * Global view state (page, query, filters, time range, live refresh) kept in
- * the URL hash so every view is linkable:
- *   #/<page>/<param>?q=...&f=<json>&range=15m&from=..&to=..&refresh=5000&c=..&mode=..
+ * the URL (HTML5 history) so every view is linkable:
+ *   /<page>/<param>?q=...&f=<json>&range=15m&from=..&to=..&refresh=5000&c=..&mode=..
+ * Navigation between pages pushes a history entry; changing filters/time on a
+ * page replaces it. Old "#/<page>..." links are redirected on load.
  */
 
 export const RANGES = ["5m", "15m", "1h", "6h", "24h"];
@@ -57,11 +59,10 @@ export const refresh = () => {
 	tick.n++;
 };
 
-const parseHash = (hash) => {
-	const text = hash.replace(/^#\/?/, "");
-	const qIndex = text.indexOf("?");
-	const pathPart = qIndex === -1 ? text : text.slice(0, qIndex);
-	const query = new URLSearchParams(qIndex === -1 ? "" : text.slice(qIndex + 1));
+/** Parse "/page/param?query" (pathname + search). */
+const parseLocation = (pathname, search) => {
+	const pathPart = pathname.replace(/^\/+/, "");
+	const query = new URLSearchParams(search || "");
 	const segments = pathPart.split("/").filter(Boolean).map(decodeURIComponent);
 	const out = Object.assign({}, DEFAULTS, { filters: [], cols: [] });
 
@@ -86,7 +87,7 @@ const parseHash = (hash) => {
 	return out;
 };
 
-const buildHash = (v) => {
+const buildUrl = (v) => {
 	const query = new URLSearchParams();
 	const set = (key, value) => {
 		if (value !== null && value !== undefined && value !== "" && value !== DEFAULTS[key]) {
@@ -111,7 +112,7 @@ const buildHash = (v) => {
 		query.set("f", JSON.stringify(v.filters));
 	}
 
-	const path = "#/" + encodeURIComponent(v.page) + (v.param ? "/" + v.param.split("/").map(encodeURIComponent).join("/") : "");
+	const path = "/" + encodeURIComponent(v.page) + (v.param ? "/" + v.param.split("/").map(encodeURIComponent).join("/") : "");
 	const qs = query.toString();
 	return path + (qs ? "?" + qs : "");
 };
@@ -135,11 +136,15 @@ const snapshot = () => {
 	};
 };
 
-const applyHash = () => {
-	const parsed = parseHash(location.hash);
+const currentUrl = () => {
+	return location.pathname + location.search;
+};
 
-	if (buildHash(parsed) === untracked(() => {
-		return buildHash(snapshot());
+const applyLocation = () => {
+	const parsed = parseLocation(location.pathname, location.search);
+
+	if (buildUrl(parsed) === untracked(() => {
+		return buildUrl(snapshot());
 	})) {
 		return;
 	}
@@ -151,16 +156,32 @@ const applyHash = () => {
 	});
 };
 
-/** Start two-way sync between `view` and location.hash. */
+/** Redirect legacy "#/page/..." URLs to the history form. */
+const upgradeHashUrl = () => {
+	if (location.hash.indexOf("#/") === 0) {
+		history.replaceState(null, "", location.hash.slice(1));
+	}
+};
+
+/**
+ * Start two-way sync between `view` and the URL. The qrp router (main.js)
+ * intercepts links and fires "qrp:navigate" on pushState/replaceState.
+ */
 export const startUrlSync = () => {
-	applyHash();
-	window.addEventListener("hashchange", applyHash);
+	upgradeHashUrl();
+	applyLocation();
+	window.addEventListener("popstate", applyLocation);
+	window.addEventListener("qrp:navigate", applyLocation);
 
 	effect(() => {
-		const next = buildHash(snapshot());
+		const next = buildUrl(snapshot());
 
-		if (next !== location.hash) {
-			history.replaceState(null, "", next);
+		if (next !== untracked(currentUrl)) {
+			const samePage = untracked(() => {
+				const current = parseLocation(location.pathname, location.search);
+				return current.page === view.page && current.param === view.param;
+			});
+			navigate(next, { replace: samePage });
 		}
 	});
 
@@ -192,12 +213,12 @@ export const startUrlSync = () => {
  */
 export const go = (page, param, overrides) => {
 	const next = Object.assign(snapshot(), { page, param: param || "" }, overrides || {});
-	location.hash = buildHash(next);
+	navigate(buildUrl(next));
 };
 
 /** href for a link to a page (keeps global state). */
 export const hrefFor = (page, param, overrides) => {
-	return buildHash(Object.assign(snapshot(), { page, param: param || "" }, overrides || {}));
+	return buildUrl(Object.assign(snapshot(), { page, param: param || "" }, overrides || {}));
 };
 
 // --- filters -----------------------------------------------------------------

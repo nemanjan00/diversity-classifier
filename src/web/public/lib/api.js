@@ -17,7 +17,7 @@ const readToken = () => {
 			// storage unavailable: keep it in memory only
 		}
 
-		history.replaceState(null, "", location.pathname + location.search + "#/");
+		history.replaceState(null, "", location.pathname + location.search);
 		return token;
 	}
 

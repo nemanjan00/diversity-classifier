@@ -1186,7 +1186,7 @@ const createEngine = (options) => {
 			const def = Object.assign({}, input, { scope: scopeOf(input.scope) });
 			map.set(def.name, def);
 			definitionsChanged(kind, def.name, context);
-			return { [kind]: def.name, url_path: "/#/" + (kind === "dashboard" ? "dashboards" : "visualize") + "/" + encodeURIComponent(def.name) };
+			return { [kind]: def.name, url_path: "/" + (kind === "dashboard" ? "dashboards" : "visualize") + "/" + encodeURIComponent(def.name) };
 		},
 
 		removeView: (kind, name, context) => {
