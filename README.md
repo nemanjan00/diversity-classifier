@@ -32,6 +32,8 @@ shrinks toward zero and so does the cost of watching.
 A Kibana-style **web UI** lets humans explore the same data: Discover,
 per-field histograms, timeseries, dashboards the agent can build for you.
 
+![Dashboard built by the agent over synthetic shop logs](docs/screenshots/dashboard.png)
+
 ## Quick start (Claude Code)
 
 ```sh
@@ -171,6 +173,25 @@ npx -y @nemanjan00/diversity-streamer --http 7070      # or let the agent call t
 - **Visualize**, **Dashboards**: the agent can create dashboards with
   `define_dashboard`.
 - **Unclassified** (Classify / Ignore), **Alarms**, **Sources**.
+
+| | |
+|---|---|
+| ![Discover: query bar, hits over time stacked by classifier, field sidebar, events](docs/screenshots/discover.png) | ![Classifier page: typed template, rate, one histogram and over-time panel per field](docs/screenshots/classifier.png) |
+| **Discover**: hits over time (stacked by classifier), field sidebar, events | **Classifier**: typed template and one panel per field; clicks cross-filter |
+| ![Unclassified queue: clusters with masked shapes and suggested templates](docs/screenshots/unclassified.png) | ![Dashboard in dark mode](docs/screenshots/dashboard-dark.png) |
+| **Unclassified**: the agent's to-do list, with suggested templates; joined stack traces are one cluster | **Dashboards**, light and dark |
+
+The screenshots show synthetic logs from a fictional shop
+(`scripts/demo/generate.js`). Regenerate them with `yarn screenshots`, or
+try the UI yourself:
+
+```sh
+# from a clone, terminal 1: the server (stdio stays attached to the terminal)
+node bin/mcp.js --http 7070 --no-global --state /tmp/demo.json
+
+# terminal 2: seed it like an agent would, then stream demo logs; open http://127.0.0.1:7070
+node scripts/demo/seed.js http://127.0.0.1:7070 --demo
+```
 
 It binds to `127.0.0.1` by default. A non-loopback bind requires `--token`, and
 `--read-only` disables edits. Built with

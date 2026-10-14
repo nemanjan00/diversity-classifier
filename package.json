@@ -38,10 +38,11 @@
 	"scripts": {
 		"mcp": "node bin/mcp.js",
 		"mcp-watch": "nodemon -q bin/mcp.js",
-		"lint": "eslint src/ bin/",
+		"lint": "eslint src/ bin/ scripts/",
 		"test": "jest",
 		"test:watch": "jest --watch",
-		"prepare": "husky"
+		"prepare": "husky",
+		"screenshots": "node scripts/demo/screenshots.js"
 	},
 	"engines": {
 		"node": ">=20"
