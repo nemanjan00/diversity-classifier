@@ -534,9 +534,24 @@ are queued (capped) and delivered when an agent connects.
 
 ### 13.4 Pages
 
-The UI is a single static page with no build step, served from `src/web/public`.
-It uses vanilla JS plus a small charting lib from a CDN, and supports light and
-dark themes.
+The UI is built on [qrp-shadcdn](https://github.com/nemanjan00/qrp-shadcdn)
+(shadcn/ui components on the 5 KB qrp reactive core). There is no React and no
+build step.
+
+* `@nemanjan00/qrp` and `@nemanjan00/qrp-shadcdn` are npm dependencies.
+  The server serves their `dist/` files under `/vendor/` and maps them with an
+  `<script type="importmap">`, so the UI works **offline**, with no CDN.
+  The prebuilt `qrp-shadcdn.css` is used, and custom layout CSS stays minimal.
+* App code lives in `src/web/public/` as plain ES modules, one per page.
+* The shell is a `Sidebar` layout. Components used: `DataTable` (events,
+  clusters, alarms), `Chart` (histograms, timeseries, sparklines), `Dialog` and
+  `Sheet` (editors), `Combobox` (classifier/field pickers), `Sonner` (alarm
+  toasts), `Badge` (levels, alarm states) and `Tabs`.
+* SSE updates write into qrp `state` proxies, so only the bound DOM nodes
+  update. This is what lets the live tail and the counters keep up with
+  high-rate streams.
+* Dark mode follows `prefers-color-scheme`, toggled with `class="dark"` on
+  `<html>`.
 
 1. **Overview**: classified ratio over time, lines/s per source, firing
    alarms, top classifiers and top unclassified clusters.
