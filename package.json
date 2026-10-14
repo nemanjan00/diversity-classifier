@@ -1,0 +1,37 @@
+{
+	"name": "diversity-classifier",
+	"version": "0.1.0",
+	"description": "MCP server that lets an AI agent watch log streams cheaply: teach it templates, get only unknown lines, metrics and alarms",
+	"main": "src/index.js",
+	"bin": {
+		"diversity-classifier": "bin/mcp.js"
+	},
+	"license": "MIT",
+	"author": "Nemanja Nedeljkovic <nemanjan00@gmail.com>",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nemanjan00/diversity-classifier.git"
+	},
+	"keywords": [
+		"mcp",
+		"logs",
+		"log-analysis",
+		"classifier",
+		"ai",
+		"claude"
+	],
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.32.1",
+		"@nemanjan00/qrp": "^0.13.0",
+		"@nemanjan00/qrp-shadcdn": "^0.3.0"
+	},
+	"devDependencies": {
+		"@babel/core": "^8.0.7",
+		"@babel/eslint-parser": "^8.0.7",
+		"eslint": "8",
+		"husky": "^9.1.7",
+		"jest": "^30.5.2",
+		"lint-staged": "^17.6.0",
+		"nodemon": "^3.1.14"
+	}
+}

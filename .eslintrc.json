@@ -1,0 +1,31 @@
+{
+	"root": true,
+	"parser": "@babel/eslint-parser",
+	"parserOptions": {
+		"requireConfigFile": false,
+		"ecmaVersion": 2022,
+		"sourceType": "script"
+	},
+	"env": {
+		"es2022": true,
+		"node": true,
+		"commonjs": true,
+		"jest": true
+	},
+	"extends": "eslint:recommended",
+	"rules": {
+		"indent": ["error", "tab", { "SwitchCase": 1 }],
+		"quotes": ["error", "double", { "allowTemplateLiterals": true }],
+		"semi": ["error", "always"],
+		"no-param-reassign": "error",
+		"no-trailing-spaces": "error",
+		"no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
+	},
+	"overrides": [
+		{
+			"files": ["src/web/public/**/*.js"],
+			"parserOptions": { "sourceType": "module" },
+			"env": { "browser": true, "node": false, "commonjs": false }
+		}
+	]
+}
