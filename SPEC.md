@@ -335,8 +335,15 @@ Every classifier node keeps **incremental all-time aggregates**:
   * string: top-K value counts (capped map, Space-Saving algorithm), distinct
     estimate
 
-The **event store** (ring buffer per classifier, configurable size) supports
-exact queries over recent events.
+The **event store** supports exact queries over recent events. It is a ring
+buffer per classifier, under a global cap that evicts oldest-first across
+classifiers. Each classifier reports its **retained window** (oldest retained
+event time). The UI shades time ranges older than that window, and the
+aggregate counters still cover the full history. Field values are interned,
+and numeric fields are stored unboxed in typed arrays per classifier, which
+keeps about 200k events in tens of MB. A query scans only the classifiers that
+match the `classifier` glob, and inside each classifier it binary-searches the
+time range.
 
 ### 7.1 Filter language (`where`)
 
@@ -350,7 +357,33 @@ Mongo-style, ANDed at top level:
 Operators: `eq` (implicit), `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`,
 `regex`, `exists`, plus `and`, `or`, `not`.
 
-### 7.2 Queries
+### 7.2 Query string (KQL-like)
+
+Every query tool and the UI search bar accept `q`, a text query that compiles
+to the same `where` tree. When both `q` and `where` are given they are ANDed.
+The text form is easier for both the agent and humans to type:
+
+```
+classifier:http.* and status >= 500 and not path:/health*
+level:(error or fatal) and $source:k8s and $labels.pod:api-7f*
+took > 2s and client:"9b1c..."          # typed literals: durations, bytes, timestamps
+peer.host:db-* or exists:err.code
+```
+
+* `field:value` means equality. A `*` in the value is a glob, `/re/` is a
+  regex, `(a or b)` is a set, `exists:field` tests for presence, and the
+  comparison operators are `> >= < <=`.
+* Comparisons use the field's declared type, so `took > 2s` compares in ms and
+  `size > 1MB` in bytes.
+* `classifier:` filters by classifier path and accepts globs. A bare term
+  without `field:` is a substring search over the raw line, available for
+  `store: "full"` events only.
+* Parse errors return the error position, which the UI underlines.
+
+### 7.3 Queries
+
+All queries take `q`/`where`, `classifier` (glob) and a time range
+(`since`/`until`, ISO or relative `-15m`, `now`).
 
 * **search_events**: classifier (prefix match allowed, `http` includes
   `http.admin`), `where`, `since`/`until` (ISO or relative `-15m`), `limit`,
@@ -360,8 +393,21 @@ Operators: `eq` (implicit), `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`,
   or explicit `bounds: [...]`). Optional `group_by` adds a histogram per value
   of another field (top-K groups). With `where`/`since` it is computed exactly
   from the event store. Without them it comes from all-time aggregates.
-* **timeseries**: count, or `agg` (`sum|avg|max|min|p90`) of a numeric field,
-  per `interval` over a window, optionally `group_by`.
+* **timeseries** (Kibana's date histogram): count, or `agg`
+  (`sum|avg|min|max|p50|p90|p99|distinct`) of a field, per `interval`
+  (default: auto, about 60 buckets). An optional `split_by` field gives one
+  series per top-K value plus `other`. This is how "status over time" or
+  "errors per pod over time" is drawn.
+* **heatmap**: the distribution of a numeric field over time, i.e. time
+  buckets × value buckets (log-scale by default) → count. For example, latency
+  spread per minute.
+* **field_summary** (Kibana's field sidebar): for a result set, list every
+  field with its type, its presence %, and either the top 5 values with %
+  (strings) or min/max/avg/p50/p90 (numbers). It is computed from up to
+  `sample` (default 5000) matching events.
+* **fields**: the field catalogue of a classifier subtree, i.e. name, type,
+  where it comes from (head, parser, child) and presence. Used for
+  autocomplete.
 * **stats**: overview of totals, classified ratio, rate per classifier
   (1m/5m/1h), top clusters, alarm states, source health.
 
@@ -512,6 +558,8 @@ so multiline records from different streams never interleave.
 | `ingest` | Push lines. |
 | `ignore_cluster` | Shortcut: turn a cluster's suggested template into an `ignore.<id>` classifier with `store: "count"`, which removes it from the queue (section 6). |
 | `set_notifications` | Mute, unmute, debounce timing. |
+| `fields` / `field_summary` / `heatmap` | Section 7.3. |
+| `define_visualization` / `define_dashboard` / `remove_*` / `list_*` | Saved charts and dashboards for the web UI (section 13.4). Returns a UI link. |
 | `web_ui` | Start the web UI on demand (if not started with `--http`) and return its URL. |
 | `export_definitions` / `import_definitions` | Share classifier packs (JSON) between projects. |
 
@@ -540,8 +588,8 @@ Everything the agent defines persists across runs. The next session starts
 with the server already classifying and alarming, and does not need to relearn
 the logs.
 
-**Persisted:** parsers, classifiers, alarms, tool-added sources, notification
-settings. Also persisted: the
+**Persisted:** parsers, classifiers, alarms, tool-added sources, saved
+visualizations and dashboards, notification settings. Also persisted: the
 `new_value` alarms' seen-sets (capped), so a restart does not re-fire on every
 known value.
 
@@ -606,50 +654,86 @@ session ends.
   the client picks the sample rate and filters), `cluster` (new or grown),
   `alarm`, `source`, `stats` (every 2 s) and `definitions` (changed).
 
-### 13.4 Pages
+### 13.4 UI: Kibana for the classified stream
 
-The UI is built on [qrp-shadcdn](https://github.com/nemanjan00/qrp-shadcdn)
-(shadcn/ui components on the 5 KB qrp reactive core). There is no React and no
-build step.
+The web UI is how a **human** explores what the agent has taught the server:
+search, metrics and charts over classified events. The agent works through
+MCP, and the human works here. Both use the same engine and the same
+definitions.
 
-* `@nemanjan00/qrp` and `@nemanjan00/qrp-shadcdn` are npm dependencies.
-  The server serves their `dist/` files under `/vendor/` and maps them with an
-  `<script type="importmap">`, so the UI works **offline**, with no CDN.
-  The prebuilt `qrp-shadcdn.css` is used, and custom layout CSS stays minimal.
-* App code lives in `src/web/public/` as plain ES modules, one per page.
-* The shell is a `Sidebar` layout. Components used: `DataTable` (events,
-  clusters, alarms), `Chart` (histograms, timeseries, sparklines), `Dialog` and
-  `Sheet` (editors), `Combobox` (classifier/field pickers), `Sonner` (alarm
-  toasts), `Badge` (levels, alarm states) and `Tabs`.
-* SSE updates write into qrp `state` proxies, so only the bound DOM nodes
-  update. This is what lets the live tail and the counters keep up with
-  high-rate streams.
-* Dark mode follows `prefers-color-scheme`, toggled with `class="dark"` on
-  `<html>`.
+**Stack:** [qrp-shadcdn](https://github.com/nemanjan00/qrp-shadcdn) (shadcn/ui
+on the 5 KB qrp reactive core). There is no React and no build step.
+`@nemanjan00/qrp` and `@nemanjan00/qrp-shadcdn` are npm dependencies. The server
+serves their `dist/` files under `/vendor/` and maps them with an importmap, so
+the UI works offline. App code lives in `src/web/public/` as plain ES modules,
+one per page. SSE updates write into qrp `state` proxies, so only the bound DOM
+nodes update. Light and dark themes follow `prefers-color-scheme`.
 
-1. **Overview**: classified ratio over time, lines/s per source, firing
-   alarms, top classifiers and top unclassified clusters.
-2. **Live tail**: a merged multistream tail. Each line is coloured by
-   classifier, unclassified lines are highlighted, and extracted fields are
-   underlined (hover shows name, type and value). Filter by source, label,
-   classifier, `where`, or "unclassified only". Pause and scrollback come from
-   the ring buffers.
-3. **Unclassified**: clusters with counts, sparklines and examples. **Classify**
-   opens the suggested template in the editor, and **Ignore** creates a count-only
-classifier. The page only ever lists records that nothing matches, so an empty
-page means everything is understood.
-4. **Classifier editor**: template input with live syntax highlighting of
-   captures and a type picker. **Test** runs against the cluster or buffer and
-   shows matched lines with highlighted fields, near-misses, and the absorbed
-   count. Also includes parent/envelope selection, a priority and store level,
-   and a scope (project/global).
-5. **Explore**: histogram and timeseries builder (classifier, field, `where`,
-   `group_by`, window), plus an event search table.
-6. **Alarms**: list with state, a firing history, and create/edit forms per
-   kind.
-7. **Sources**: health per source and per demux label, add/remove, restart.
-8. **Definitions**: tree of parsers, envelopes and classifiers with their
-   scope, import/export of packs, and disabled definitions with errors.
+**Global controls** (top bar, shared by all pages, and kept in the URL so views
+are linkable):
+
+* **Query bar**: the KQL-like `q` (section 7.2), with autocomplete for fields,
+  values and classifiers taken from `fields`/`field_summary`. Errors are
+  underlined at the parse position.
+* **Filter pills**: structured filters added by clicking in charts and
+  tables. Each pill can be toggled, negated or removed.
+* **Time picker**: quick ranges (last 5m/15m/1h/24h), absolute ranges, and
+  **live mode** with a refresh interval of 1s/5s/off. The part of the range
+  older than the retained window is shaded and marked "aggregates only".
+
+**Pages:**
+
+1. **Discover** (the default page)
+   * Hits-over-time bar chart for the current query. Drag across it to zoom
+     the time range. It can be stacked by classifier or by any field.
+   * **Field sidebar**: fields of the matched classifiers, grouped by
+     classifier, with type icons. Clicking a field opens its `field_summary`:
+     top values with % bars and **+ / −** buttons (filter for / against), or
+     numeric stats with a mini histogram. Each field also has a **Visualize**
+     button.
+   * **Event table**: time, classifier badge and selected field columns (add
+     them from the sidebar). Rows expand to the raw line, with extracted fields
+     highlighted inline, plus a field/value table that has + / − on every value.
+   * The **Unclassified** toggle switches the table to the queue (clusters),
+     so unknown lines can be searched the same way.
+2. **Classifiers** (explorer)
+   * A tree of envelopes → classifiers → sub-classifiers. Each node shows a
+     count, a rate sparkline, store level and scope, and has an error marker
+     when disabled.
+   * **Classifier detail**: definition (template with typed captures
+     highlighted), rate over time, sample events, and **one panel per field**.
+     A field panel shows the value histogram (top-K bars or numeric
+     distribution) and the field **over time** (stacked top values, or a
+     heatmap for numbers). Clicking a bar applies it as a filter to the whole
+     page, so the other fields' panels re-render for that subset. This is
+     cross-filtering: for example, click `status=503` and see which `peer.host`
+     and which `took` distribution go with it.
+   * **Editor** (`Sheet`): template with live highlighting, a type picker,
+     parent/envelope/priority/store/scope settings, and **Test** against the
+     queue (matches, near-misses, absorbed count) before saving.
+3. **Visualize**: a chart builder over any query.
+   * **Bar**: terms of a field (top-K), optionally split by a second field.
+   * **Histogram**: buckets of a numeric field.
+   * **Line/area over time**: count or aggregate (`avg/p90/max/sum/distinct`),
+     split by a field.
+   * **Heatmap**: numeric field over time.
+   * **Metric tile**: a single aggregate, with a delta against the previous
+     period.
+   * **Table**: group by one or more fields with aggregate columns.
+
+   Charts can be saved, which persists them to the state file.
+4. **Dashboards**: a grid of saved visualizations that share the global query
+   and time range. Clicking a chart adds a filter, and every panel then
+   updates. Dashboards persist with the definitions, so they come back next
+   run. The **agent can build them too** with the `define_dashboard` tool, e.g.
+   "I classified the nginx logs and made you a dashboard: [link]".
+5. **Unclassified**: the queue (section 6), with clusters, counts, sparklines
+   and examples. **Classify** opens the editor prefilled with the suggested
+   template, and **Ignore** creates a count-only classifier. An empty page
+   means everything is understood.
+6. **Alarms & Sources** (secondary): alarm states, firing history (each
+   firing links to Discover with its filter and time applied), and per-source
+   and per-label health. Mostly read-only, since the agent manages these.
 
 Edits from the UI and edits from the agent go through the same handlers. The
 agent gets a `definitions`-kind notification when a human changed something,
@@ -662,7 +746,8 @@ as constants in `src/config`:
 
 | Setting | Default |
 |---|---|
-| `EVENTS_PER_CLASSIFIER` | 5000 |
+| `EVENTS_PER_CLASSIFIER` | 20000 |
+| `EVENTS_TOTAL` | 200000 |
 | `UNCLASSIFIED_BUFFER` | 20000 |
 | `MAX_CLUSTERS` | 2000 |
 | `CLUSTER_EXAMPLES` | 5 |
