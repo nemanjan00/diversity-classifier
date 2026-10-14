@@ -229,6 +229,7 @@ const renderResult = (def, r) => {
 				from: r.bounds.from,
 				to: r.bounds.to,
 				retainedSince: r.data.retained_since,
+				empty: def.empty,
 				onBrush: setAbsoluteRange,
 				onSeries: (key) => {
 					if (def.split_by && key !== "other") {

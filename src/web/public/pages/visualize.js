@@ -1,5 +1,5 @@
 import {
-	state, el, effect, batch, toast,
+	state, el, effect, batch, toast, when,
 	Button, Card, Input, Label, NativeSelect, NativeSelectOption
 } from "@nemanjan00/qrp-shadcdn";
 import { api } from "../lib/api.js";
@@ -19,7 +19,7 @@ const DEBOUNCE_MS = 400;
 export const vizPreset = state({ value: null });
 
 const blank = () => {
-	return { name: "", title: "", type: "bar", classifier: "", field: "", agg: "count", split_by: "", interval: "", buckets: 20, top: 15 };
+	return { name: "", title: "", type: "bar", classifier: "", field: "", agg: "count", split_by: "", interval: "", buckets: 20, top: 15, empty: "connect" };
 };
 
 const clean = (b) => {
@@ -40,6 +40,10 @@ const clean = (b) => {
 
 	if (b.type === "bar" || b.type === "table" || b.type === "line" || b.type === "area") {
 		out.top = Number(b.top) || 15;
+	}
+
+	if ((b.type === "line" || b.type === "area") && b.empty && b.empty !== "connect") {
+		out.empty = b.empty;
 	}
 
 	if (b.type === "table" && b.split_by) {
@@ -167,6 +171,11 @@ export const VizBuilder = () => {
 				return b.type === "table" ? "Group by (comma separated)" : "Split by";
 			}, withList(Input({ bind: [b, "split_by"], placeholder: "optional" }))),
 			control("Interval", Input({ bind: [b, "interval"], placeholder: "auto (e.g. 30s, 1m)" })),
+			when(() => {
+				return b.type === "line" || b.type === "area";
+			}, () => {
+				return control("Empty buckets", select("empty", [["connect", "connect (dashed)"], ["zero", "draw as 0"], ["gap", "leave a gap"]]));
+			}),
 			el("div", { class: "dc-grid2" },
 				control("Buckets", Input({ type: "number", bind: [b, "buckets"] })),
 				control("Top N", Input({ type: "number", bind: [b, "top"] }))),

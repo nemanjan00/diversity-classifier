@@ -761,7 +761,9 @@ are linkable):
    * **Bar**: terms of a field (top-K), optionally split by a second field.
    * **Histogram**: buckets of a numeric field.
    * **Line/area over time**: count or aggregate (`avg/p90/max/sum/distinct`),
-     split by a field.
+     split by a field. Buckets without data for a statistic are connected
+     with a dashed line by default (`empty: "zero"` draws them as 0,
+     `"gap"` leaves a gap); counts and sums are always 0 there.
    * **Heatmap**: numeric field over time.
    * **Metric tile**: a single aggregate, with a delta against the previous
      period.

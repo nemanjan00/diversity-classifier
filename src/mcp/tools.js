@@ -477,6 +477,7 @@ const TOOLS = [
 			split_by: str("Split field"),
 			group_by: { type: "array", items: { type: "string" } },
 			interval: str("Time bucket"),
+			empty: { type: "string", enum: ["connect", "zero", "gap"], description: "line/area: buckets with no data for a statistic (avg/p90/max…): connect with a dashed line (default), draw as 0, or leave a gap. Counts/sums are always 0." },
 			buckets: num("Buckets"),
 			top: num("Top N"),
 			scope: CLASSIFIER_PROPS.scope

@@ -47,13 +47,25 @@ const fraction = (event, node) => {
  * Time chart (stacked bars, lines or areas) with tooltip and drag-to-zoom.
  * @param {{ times: number[], interval: number, series: Array<{ key: string, values: number[] }>,
  *   from?: number, to?: number, retainedSince?: ?string, type?: "bar"|"line"|"area", height?: number,
- *   onBrush?: function(number, number): void, onSeries?: function(string): void }} opts
+ *   onBrush?: function(number, number): void, onSeries?: function(string): void,
+ *   empty?: "connect"|"zero"|"gap" }} opts
+ *   empty - buckets without data (null, e.g. p90 of nothing): dashed line across (default),
+ *           drawn as 0, or left as a gap
  */
 export const timeChart = (opts) => {
 	const height = opts.height || 140;
 	const type = opts.type || "bar";
 	const times = opts.times || [];
-	const series = opts.series || [];
+	const empty = opts.empty || "connect";
+	const series = (opts.series || []).map((s) => {
+		if (empty !== "zero") {
+			return s;
+		}
+
+		return Object.assign({}, s, { values: s.values.map((v) => {
+			return v === null || v === undefined ? 0 : v;
+		}) });
+	});
 	const interval = opts.interval || 60000;
 	const from = opts.from !== undefined ? opts.from : (times[0] || Date.now() - 3600000);
 	const to = opts.to !== undefined ? Math.max(opts.to, from + interval) : (times.length ? times[times.length - 1] + interval : Date.now());
@@ -118,6 +130,21 @@ export const timeChart = (opts) => {
 				return segment.length;
 			});
 
+			if (empty === "connect") {
+				segments.slice(1).forEach((points, k) => {
+					const previous = segments[k];
+					shapes.push(el("polyline", {
+						points: previous[previous.length - 1] + " " + points[0],
+						fill: "none",
+						stroke: colorFor(si),
+						"stroke-width": "1.5",
+						"stroke-dasharray": "4 4",
+						"stroke-opacity": "0.6",
+						"vector-effect": "non-scaling-stroke"
+					}));
+				});
+			}
+
 			segments.forEach((points) => {
 				if (type === "area") {
 					const first = points[0].split(",")[0];
@@ -166,16 +193,20 @@ export const timeChart = (opts) => {
 			return;
 		}
 
-		const rows = series.filter((s) => {
-			return s.values[i];
-		}).map((s) => {
+		const present = series.filter((s) => {
+			return s.values[i] !== null && s.values[i] !== undefined;
+		});
+		const rows = (present.length ? present.filter((s) => {
+			return s.values[i] || present.length === 1;
+		}) : []).map((s) => {
 			const si = series.indexOf(s);
 			return el("div", { class: "dc-tooltip-row" },
 				el("span", { class: "dc-swatch", style: "background:" + colorFor(si) }),
 				el("span", { class: "dc-tooltip-key" }, s.key),
 				el("b", {}, formatNumber(s.values[i])));
 		});
-		tooltip.replaceChildren(el("div", { class: "dc-tooltip-title" }, formatTime(times[i]) + (type === "bar" && series.length > 1 ? "  Σ " + formatNumber(totals[i]) : "")), ...rows);
+		const noData = present.length ? [] : [el("div", { class: "dc-tooltip-row dc-muted" }, "no data in this bucket")];
+		tooltip.replaceChildren(el("div", { class: "dc-tooltip-title" }, formatTime(times[i]) + (type === "bar" && series.length > 1 ? "  Σ " + formatNumber(totals[i]) : "")), ...rows, ...noData);
 		tooltip.style.display = "block";
 		tooltip.style.left = Math.min(f * 100, 75) + "%";
 	});
