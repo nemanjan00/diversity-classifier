@@ -288,6 +288,27 @@ prefilter literal was present but the regex failed). Use it to debug a template.
 
 ## 6. Unclassified clustering
 
+**Invariant:** the unclassified buffer and clusters contain **only records
+that no current classifier matches**. Nothing is hidden, snoozed or kept "for
+reference". The unclassified view is the agent's work queue, and the goal is
+to drive it to zero. The following operations maintain this invariant:
+
+* **Define or change a classifier or parser.** Matching records leave at once
+  (section 5.5). A cluster whose buffered records were all absorbed is deleted
+  entirely, including its count beyond the buffer, which moves to the
+  classifier's `backlog`.
+* **Remove a classifier.** Its stored raw records return to the buffer and
+  their clusters, because they are unclassified again.
+* **Noise.** The agent does not dismiss noise, it classifies it. Noise is a
+  classifier with `store: "count"` (conventionally named `ignore.*`). This
+  keeps noise counted, rate-alarmable and visible in `stats`, while the queue
+  stays clean.
+* **Envelope-only matches** stay in the queue, clustered by body (section 5.4).
+  Only a leaf classification removes a record from the queue.
+* **Eviction.** When the buffer or cluster cap is hit, the oldest records or
+  clusters are evicted and counted in `stats.unclassified.evicted`, so the
+  agent knows the queue overflowed. Records are never silently reclassified.
+
 Each unclassified record is **masked**, replacing variable tokens with
 placeholders in this order: quoted strings, UUIDs, ISO timestamps, IPs, URLs,
 paths, hex ≥ 8 chars, numbers (including units like `12ms`), and finally long
@@ -387,7 +408,7 @@ Delivered through **both** of these:
 
 Kinds:
 
-* **unclassified digest**: debounced (`quiet` 5s, `max_wait` 60s, both
+* **unclassified digest** (sent only while the queue is non-empty): debounced (`quiet` 5s, `max_wait` 60s, both
   configurable). Only *new clusters*, or clusters whose count grew by a factor
   (e.g. ×10) since the last digest, are reported. Each is one compact line:
   `id`, count, shape. Repeats of known clusters never re-notify on their own.
@@ -489,7 +510,7 @@ so multiline records from different streams never interleave.
 | `alarm_history` | Recent firings. |
 | `add_source` / `remove_source` / `list_sources` | Section 10. |
 | `ingest` | Push lines. |
-| `dismiss_cluster` | Hide an unclassified cluster from digests without classifying it (persisted by shape). |
+| `ignore_cluster` | Shortcut: turn a cluster's suggested template into an `ignore.<id>` classifier with `store: "count"`, which removes it from the queue (section 6). |
 | `set_notifications` | Mute, unmute, debounce timing. |
 | `web_ui` | Start the web UI on demand (if not started with `--http`) and return its URL. |
 | `export_definitions` / `import_definitions` | Share classifier packs (JSON) between projects. |
@@ -520,7 +541,7 @@ with the server already classifying and alarming, and does not need to relearn
 the logs.
 
 **Persisted:** parsers, classifiers, alarms, tool-added sources, notification
-settings, and cluster **dismissals** (section 11). Also persisted: the
+settings. Also persisted: the
 `new_value` alarms' seen-sets (capped), so a restart does not re-fire on every
 known value.
 
@@ -614,7 +635,9 @@ build step.
    classifier, `where`, or "unclassified only". Pause and scrollback come from
    the ring buffers.
 3. **Unclassified**: clusters with counts, sparklines and examples. **Classify**
-   opens the suggested template in the editor. **Dismiss** is also available.
+   opens the suggested template in the editor, and **Ignore** creates a count-only
+classifier. The page only ever lists records that nothing matches, so an empty
+page means everything is understood.
 4. **Classifier editor**: template input with live syntax highlighting of
    captures and a type picker. **Test** runs against the cluster or buffer and
    shows matched lines with highlighted fields, near-misses, and the absorbed
