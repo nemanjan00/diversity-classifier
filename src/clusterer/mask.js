@@ -15,7 +15,7 @@ const MASKS = [
 	{ type: "hex", placeholder: "<hex>", re: "\\b0[xX][0-9a-fA-F]+\\b|\\b(?=[0-9a-fA-F]*\\d)(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{8,}\\b" },
 	{ type: "duration", placeholder: "<dur>", re: "(?<![\\w.])\\d+(?:\\.\\d+)?(?:ns|us|µs|ms|s|m|h)(?![\\w])" },
 	{ type: "bytes", placeholder: "<bytes>", re: "(?<![\\w.])\\d+(?:\\.\\d+)?\\s?(?:[KMGT]i?B|B)(?![\\w])" },
-	{ type: "id", placeholder: "<id>", re: "\\b(?=[\\w-]*\\d)(?=[\\w-]*[A-Za-z])[\\w-]{6,}\\b" },
+	{ type: "id", placeholder: "<id>", re: "\\b(?=[\\w-]*\\d)(?=[\\w-]*[A-Za-z])[\\w-]{6,}\\b|\\b(?=[\\w-]*\\d{3})(?=[\\w-]*[A-Za-z])[\\w-]+\\b" },
 	{ type: "number", placeholder: "<num>", re: "(?<![\\w.])[-+]?\\d+(?:\\.\\d+)?(?![\\w])" }
 ];
 
