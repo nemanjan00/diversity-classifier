@@ -548,10 +548,10 @@ so multiline records from different streams never interleave.
 | `remove_classifier` | Removes it and its sub-classifiers. Events with raw text go back to the unclassified buffer and clusters. |
 | `reclassify` | Re-run classification over retained raw records (section 5.5). |
 | `list_classifiers` | Definitions with counts and rates. |
-| `search_events` | Section 7.2. |
-| `histogram` | Section 7.2. |
-| `timeseries` | Section 7.2. |
-| `stats` | Section 7.2. |
+| `search_events` | Section 7.3. |
+| `histogram` | Section 7.3. |
+| `timeseries` | Section 7.3. |
+| `stats` | Section 7.3. |
 | `define_alarm` / `remove_alarm` / `list_alarms` | Section 8. `list_alarms` includes state and last firing. |
 | `alarm_history` | Recent firings. |
 | `add_source` / `remove_source` / `list_sources` | Section 10. |
