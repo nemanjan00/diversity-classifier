@@ -245,6 +245,10 @@ const createSources = (options) => {
 		});
 
 		child.on("error", (error) => {
+			if (entry.child !== child) {
+				return;
+			}
+
 			entry.state = "error";
 			entry.error = error.message;
 			status(entry, "error", { error: error.message });
@@ -252,6 +256,11 @@ const createSources = (options) => {
 
 		child.on("exit", (code, signal) => {
 			stream.end();
+
+			if (entry.child !== child) {
+				return;
+			}
+
 			entry.child = null;
 
 			if (entry.stopping) {
