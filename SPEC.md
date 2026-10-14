@@ -496,7 +496,75 @@ so the agent can fix it.
 **External edits**: the files are watched. A manual edit is reloaded live and
 the change is announced through a `source`-kind notification.
 
-## 13. Configuration
+## 13. Web UI (optional)
+
+The engine can also be served over HTTP. The web server is off by default and
+is enabled with `--http [host:]port`, or by running in daemon mode.
+
+### 13.1 Run modes
+
+| Mode | Entrypoint | Transport | Use |
+|---|---|---|---|
+| stdio | `node bin/mcp.js [--http 7070]` | MCP over stdio. The web UI is optional and runs in the same process. | Claude Code launches it per session. |
+| daemon | `forever src` (`yarn web`) | MCP Streamable HTTP at `/mcp`, plus the web UI and REST API | Long-running watcher. Several agents or sessions can attach to the same engine and state. |
+
+In daemon mode the sources keep running when no agent is connected, so
+metrics and alarm history accumulate between sessions. Alarm notifications
+are queued (capped) and delivered when an agent connects.
+
+### 13.2 Security
+
+* Binds to `127.0.0.1` by default.
+* A non-loopback bind requires `--token <secret>` (or the `HTTP_TOKEN` env
+  var). The token is checked as a bearer token on `/api` and `/mcp`, and the UI
+  asks for it once and keeps it in `sessionStorage`.
+* `--read-only` disables every mutating endpoint. This is useful when the UI
+  is shared with a team.
+* The `command`-source restriction (`--allow-commands`) applies to HTTP the
+  same way it applies to MCP tools.
+
+### 13.3 REST API + live updates
+
+* `POST /api/<tool>` mirrors every MCP tool one to one, with the same handlers
+  and the same JSON arguments. The MCP and REST layers are both thin adapters
+  over `src/mcp`'s handler table, so the two can never drift apart.
+* `GET /api/events/stream` is **SSE**. It carries: `record` (sampled live tail;
+  the client picks the sample rate and filters), `cluster` (new or grown),
+  `alarm`, `source`, `stats` (every 2 s) and `definitions` (changed).
+
+### 13.4 Pages
+
+The UI is a single static page with no build step, served from `src/web/public`.
+It uses vanilla JS plus a small charting lib from a CDN, and supports light and
+dark themes.
+
+1. **Overview**: classified ratio over time, lines/s per source, firing
+   alarms, top classifiers and top unclassified clusters.
+2. **Live tail**: a merged multistream tail. Each line is coloured by
+   classifier, unclassified lines are highlighted, and extracted fields are
+   underlined (hover shows name, type and value). Filter by source, label,
+   classifier, `where`, or "unclassified only". Pause and scrollback come from
+   the ring buffers.
+3. **Unclassified**: clusters with counts, sparklines and examples. **Classify**
+   opens the suggested template in the editor. **Dismiss** is also available.
+4. **Classifier editor**: template input with live syntax highlighting of
+   captures and a type picker. **Test** runs against the cluster or buffer and
+   shows matched lines with highlighted fields, near-misses, and the absorbed
+   count. Also includes parent/envelope selection, a priority and store level,
+   and a scope (project/global).
+5. **Explore**: histogram and timeseries builder (classifier, field, `where`,
+   `group_by`, window), plus an event search table.
+6. **Alarms**: list with state, a firing history, and create/edit forms per
+   kind.
+7. **Sources**: health per source and per demux label, add/remove, restart.
+8. **Definitions**: tree of parsers, envelopes and classifiers with their
+   scope, import/export of packs, and disabled definitions with errors.
+
+Edits from the UI and edits from the agent go through the same handlers. The
+agent gets a `definitions`-kind notification when a human changed something,
+so it doesn't fight the user's edits.
+
+## 14. Configuration
 
 CLI flags override env vars, which override defaults. All of these are exposed
 as constants in `src/config`:
@@ -511,19 +579,23 @@ as constants in `src/config`:
 | `DIGEST_QUIET_MS` | 5000 |
 | `DIGEST_MAX_WAIT_MS` | 60000 |
 | `ALARM_HISTORY` | 500 |
+| `HTTP` | off (`127.0.0.1:7070` in daemon mode) |
+| `HTTP_TOKEN` | none (required for non-loopback bind) |
 | `STATE_FILE` | `./.diversity-classifier.json` |
 | `GLOBAL_STATE_FILE` | `$XDG_CONFIG_HOME/diversity-classifier/global.json` |
 
-## 14. Non-goals (v1)
+## 15. Non-goals (v1)
 
 * Long-term storage and querying of historical logs (use Loki or Elastic).
 * Arbitrary JS in parsers. Converters are a fixed, safe set.
-* Multi-tenant or remote (HTTP) transport. It could be added later.
+* Multi-tenant (several isolated engines in one daemon).
+* User accounts and roles in the web UI (single token only).
 
-## 15. Project layout
+## 16. Project layout
 
 ```
-bin/mcp.js                MCP stdio entrypoint (CLI flags)
+src/index.js              daemon entrypoint: web UI + REST + MCP Streamable HTTP (`yarn web`)
+bin/mcp.js                MCP stdio entrypoint (CLI flags, optional --http)
 src/config/               constants + env/CLI resolution
 src/patterns/             template compiler, built-in types, filters, parser registry
 src/classifier/           classifier registry, prefilter, matching, sub-classifiers
@@ -534,7 +606,8 @@ src/notifier/             debounced digests, channel + logging delivery
 src/sources/              file / command / tcp / unix / tool sources
 src/engine/               wiring: record → classify → metrics/alarms | clusterer
 src/state/                persistence
-src/mcp/                  tool + resource definitions and handlers
+src/mcp/                  tool + resource definitions and handlers (shared by MCP and REST)
+src/web/                  HTTP server, REST adapter, SSE, auth; public/ holds the static UI
 src/utils/                ring-buffer, debounce, filter (where), duration parsing, line assembler, top-k, sketch
 ```
 
