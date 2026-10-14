@@ -2,7 +2,7 @@
 	"name": "diversity-classifier",
 	"version": "0.1.0",
 	"description": "MCP server that lets an AI agent watch log streams cheaply: teach it templates, get only unknown lines, metrics and alarms",
-	"main": "src/index.js",
+	"main": "src/engine/index.js",
 	"bin": {
 		"diversity-classifier": "bin/mcp.js"
 	},
@@ -33,5 +33,35 @@
 		"jest": "^30.5.2",
 		"lint-staged": "^17.6.0",
 		"nodemon": "^3.1.14"
+	},
+	"scripts": {
+		"mcp": "node bin/mcp.js",
+		"mcp-watch": "nodemon -q bin/mcp.js",
+		"lint": "eslint src/ bin/",
+		"test": "jest",
+		"test:watch": "jest --watch",
+		"prepare": "husky"
+	},
+	"engines": {
+		"node": ">=20"
+	},
+	"files": [
+		"bin",
+		"src",
+		"!src/**/__tests__",
+		"README.md",
+		"SPEC.md",
+		"LICENSE"
+	],
+	"jest": {
+		"testEnvironment": "node",
+		"forceExit": true,
+		"testPathIgnorePatterns": [
+			"/node_modules/",
+			"/src/web/public/"
+		]
+	},
+	"lint-staged": {
+		"*.js": "eslint --fix"
 	}
 }

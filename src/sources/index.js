@@ -37,8 +37,8 @@ const normalise = (def) => {
 		throw new Error("command sources need a command");
 	}
 
-	if (def.type === "tcp" && !(def.port > 0)) {
-		throw new Error("tcp sources need a port");
+	if (def.type === "tcp" && !(typeof def.port === "number" && def.port >= 0 && def.port <= 65535)) {
+		throw new Error("tcp sources need a port (0-65535; 0 = any free port)");
 	}
 
 	if (def.type === "unix" && !def.path) {

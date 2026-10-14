@@ -19,6 +19,23 @@ const createRingBuffer = (capacity, options) => {
 		return state.items[(state.head + i) % state.items.length];
 	};
 
+	/** Free exactly one physical slot; only live items count as evicted. */
+	const dropFront = () => {
+		const item = state.items[state.head];
+		state.items[state.head] = undefined;
+		state.head = (state.head + 1) % state.items.length;
+		state.size--;
+
+		if (state.removed.has(item)) {
+			state.removed.delete(item);
+			return;
+		}
+
+		if (onEvict) {
+			onEvict(item);
+		}
+	};
+
 	const ring = {
 		capacity: () => {
 			return state.items.length;
@@ -30,7 +47,7 @@ const createRingBuffer = (capacity, options) => {
 
 		push: (item) => {
 			if (state.size === state.items.length) {
-				ring.shift();
+				dropFront();
 			}
 
 			state.items[(state.head + state.size) % state.items.length] = item;

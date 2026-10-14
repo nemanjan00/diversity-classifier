@@ -283,6 +283,90 @@ const tokenize = (template) => {
 	return tokens;
 };
 
+/**
+ * Required literal runs of a raw regex, for the prefilter. Only text at
+ * nesting depth 0, outside character classes, not followed by a quantifier;
+ * a top-level alternation means nothing is required.
+ */
+const regexLiterals = (source) => {
+	const runs = [];
+	let current = "";
+	let depth = 0;
+	let inClass = false;
+	let alternation = false;
+
+	const cut = () => {
+		if (current.length >= 3) {
+			runs.push(current);
+		}
+
+		current = "";
+	};
+
+	for (let i = 0; i < source.length; i++) {
+		const ch = source[i];
+		const next = source[i + 1];
+		const quantified = next === "?" || next === "*" || next === "+" || next === "{";
+
+		if (inClass) {
+			if (ch === "\\") {
+				i++;
+			} else if (ch === "]") {
+				inClass = false;
+			}
+
+			continue;
+		}
+
+		if (ch === "\\") {
+			const escaped = source[i + 1];
+			const afterEscape = source[i + 2];
+			const plainEscape = escaped !== undefined && !/[A-Za-z0-9]/.test(escaped);
+			i++;
+
+			if (depth === 0 && plainEscape && !(afterEscape === "?" || afterEscape === "*" || afterEscape === "+" || afterEscape === "{")) {
+				current += escaped;
+			} else {
+				cut();
+			}
+
+			continue;
+		}
+
+		if (ch === "[") {
+			inClass = true;
+			cut();
+			continue;
+		}
+
+		if (ch === "(") {
+			depth++;
+			cut();
+			continue;
+		}
+
+		if (ch === ")") {
+			depth = Math.max(0, depth - 1);
+			cut();
+			continue;
+		}
+
+		if (ch === "|" && depth === 0) {
+			alternation = true;
+		}
+
+		if (depth > 0 || /[.^$|?*+{}]/.test(ch) || quantified) {
+			cut();
+			continue;
+		}
+
+		current += ch;
+	}
+
+	cut();
+	return alternation ? [] : runs;
+};
+
 /** Flatten nested objects (json / kv captures) into dotted keys. */
 const flatten = (prefix, value, out, depth) => {
 	if (value === null || typeof value !== "object" || depth >= MAX_FLATTEN_DEPTH) {
@@ -652,17 +736,11 @@ const createPatterns = () => {
 			};
 		});
 
-		const literals = regexSource.replace(/\\./g, " ").split(/[^A-Za-z0-9_ =:/-]+/).map((part) => {
-			return part.trim();
-		}).filter((part) => {
-			return part.length >= 3 && !/[(|?*+[]/.test(part);
-		});
-
 		return finish({
 			regex,
 			source: regexSource,
 			captures,
-			literals: /[|]/.test(regexSource) ? [] : literals,
+			literals: (flags || "").indexOf("i") !== -1 ? [] : regexLiterals(regexSource),
 			uses: [],
 			segments: [{ src: regexSource, label: "regex" }],
 			template: null

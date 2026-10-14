@@ -178,7 +178,7 @@ const pathMatches = (pattern, path) => {
 	});
 };
 
-const createRuntime = (def, seed) => {
+const createRuntime = (def, seed, createdAt) => {
 	return {
 		counter: 0,
 		window: [],
@@ -189,7 +189,7 @@ const createRuntime = (def, seed) => {
 		firing: false,
 		fired: 0,
 		suppressed: 0,
-		createdAt: Date.now(),
+		createdAt: createdAt || Date.now(),
 		def
 	};
 };
@@ -431,7 +431,7 @@ const createAlarms = (options) => {
 				initial = options.knownValues(alarm.classifier, alarm.params.field);
 			}
 
-			runtimes.set(alarm.name, createRuntime(alarm, initial));
+			runtimes.set(alarm.name, createRuntime(alarm, initial, now()));
 			return alarm;
 		},
 
