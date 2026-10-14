@@ -810,15 +810,15 @@
   dependencies:
     "@tybys/wasm-util" "^0.10.3"
 
-"@nemanjan00/qrp-shadcdn@^0.3.0":
-  version "0.3.0"
-  resolved "https://registry.yarnpkg.com/@nemanjan00/qrp-shadcdn/-/qrp-shadcdn-0.3.0.tgz#070ba734951961beea441eb5640eb424d073d21c"
-  integrity sha512-hRAqeO0iMzNN13pKfxzdJkJlmQyYQI/b7ZRUheBIZdWmu4CKJCJjcMWbTxGFXAAVByfUEwHKJRZEsVY87fZ0hA==
+"@nemanjan00/qrp-shadcdn@^0.3.1":
+  version "0.3.1"
+  resolved "https://registry.yarnpkg.com/@nemanjan00/qrp-shadcdn/-/qrp-shadcdn-0.3.1.tgz#7d9e0ef92a3ade4507fa2678959089b0b55f650d"
+  integrity sha512-H3pIDLwNiO5dg1rOjWQv/giuE35q2kAPZulG6mrw63OPpSMEyuZhDp7++dzmAx6ede07Umb3Y1yLxGZX7quAkQ==
 
-"@nemanjan00/qrp@^0.13.0":
-  version "0.13.0"
-  resolved "https://registry.yarnpkg.com/@nemanjan00/qrp/-/qrp-0.13.0.tgz#54bcc8b36b62a46bd4180bd6fe1549a26cf4fc13"
-  integrity sha512-HuRH2ZpoJ5Ma9pzisdwJmH3QgvuXN6bXIhcfwy79Z/lTV9rOcgYDd8bCeC4RSqPqhHz17hhkTVRGeG6Topwt8w==
+"@nemanjan00/qrp@^0.13.1":
+  version "0.13.1"
+  resolved "https://registry.yarnpkg.com/@nemanjan00/qrp/-/qrp-0.13.1.tgz#d9d732b64de3e0d5fb605b3128b91a1d08f004fe"
+  integrity sha512-qVXbfJSdMcLyxUiFp2tFstbTXg8fnCh/yDcgtxqtyeB1hnJAZYKd55W37M8RLEYPqOH816ttc7qqI/Duv2BiVA==
 
 "@nodelib/fs.scandir@2.1.5":
   version "2.1.5"
