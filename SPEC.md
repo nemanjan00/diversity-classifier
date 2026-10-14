@@ -130,6 +130,25 @@ Example: `{status:int}` vs `{status:word|int}`.
 Parsers can reference other parsers. Cycles are rejected. Template parsers are
 inlined into the parent regex with prefixed capture names.
 
+### 4.4 Reusable heads (spread)
+
+Most log formats share a line prefix: timestamp, verbosity, sometimes a
+logger name or PID. Define it once as a template parser and **spread** it with
+`{...name}`. The parser's fields then merge into the parent namespace without a
+prefix:
+
+```jsonc
+{ "name": "head", "template": "^{ts:timestamp} {level:level} [{logger:word}]" }
+```
+
+```
+{...head} client {client:uuid} failed to connect to {peer:hostport}
+```
+
+This yields `ts`, `level`, `logger`, `client`, `peer.host`, `peer.port`. The
+non-spread form `{h:head}` would yield `h.ts`, `h.level`, `h.logger`.
+Changing `head` recompiles every classifier that uses it.
+
 ## 5. Classifiers
 
 ```jsonc
@@ -176,13 +195,41 @@ Example: `http` extracts `{method:word} {path:path} {status:int} {took:duration}
 A child `http.admin` with `on: "path"` and template `^/admin/{section:word}`
 refines it further.
 
-### 5.4 Retroactive classification
+### 5.4 Envelope classifiers
+
+An alternative to spreading a head into every classifier: define the head once
+as an **envelope** classifier that captures the message body, and attach the
+real classifiers to it as sub-classifiers.
+
+```jsonc
+{ "name": "app", "template": "{...head} {msg:rest}", "envelope": true, "body": "msg" }
+{ "name": "app.conn_failed", "parent": "app", "on": "msg",
+  "template": "client {client:uuid} failed to connect to {peer:hostport}" }
+```
+
+With `envelope: true`:
+
+* A record that matches the envelope but **none of its children** still counts
+  as **unclassified**. It goes to the clusterer, and the clusterer only masks
+  the `body` field. Timestamps and levels therefore never fragment clusters,
+  and the suggested templates are written relative to the body, ready to use
+  as children.
+* The envelope's fields (`ts`, `level`, `logger`) are attached to every child
+  event and to cluster examples, so `where: {level: "error"}` works on every
+  child. `get_unclassified` can also filter by envelope fields, e.g. "unknown
+  error-level lines only".
+* Envelopes can nest. For example, a syslog envelope might wrap an app
+  envelope, which wraps a leaf.
+* Several envelopes may coexist, one per log format or source. The first
+  matching envelope by priority wins, as with any top-level classifier.
+
+### 5.5 Retroactive classification
 
 Defining a classifier re-runs it over the retained unclassified buffer. Matched
 records move out of their clusters and become events. The tool result reports
 how many records were absorbed.
 
-### 5.5 Dry run
+### 5.6 Dry run
 
 `test_classifier` compiles a definition without saving it and runs it against
 given sample lines, or against the unclassified buffer or a cluster. It returns
@@ -374,7 +421,7 @@ so multiline records from different streams never interleave.
 |---|---|
 | `get_unclassified` | Clusters sorted by count or recency, with shape, count, examples, suggested template. Options: `limit`, `since`, `source`, `min_count`, `cluster` (one cluster with more examples). |
 | `define_parser` / `remove_parser` / `list_parsers` | Custom types. `list_parsers` includes built-ins. |
-| `test_classifier` | Dry run (section 5.5). |
+| `test_classifier` | Dry run (section 5.6). |
 | `define_classifier` | Create or replace. Returns absorbed count and sample fields. |
 | `remove_classifier` | Removes it and its sub-classifiers. Events are dropped. |
 | `list_classifiers` | Definitions with counts and rates. |
@@ -386,6 +433,7 @@ so multiline records from different streams never interleave.
 | `alarm_history` | Recent firings. |
 | `add_source` / `remove_source` / `list_sources` | Section 10. |
 | `ingest` | Push lines. |
+| `dismiss_cluster` | Hide an unclassified cluster from digests without classifying it (persisted by shape). |
 | `set_notifications` | Mute, unmute, debounce timing. |
 | `export_definitions` / `import_definitions` | Share classifier packs (JSON) between projects. |
 
@@ -410,10 +458,43 @@ The MCP `instructions` field explains the recommended loop to the agent:
 
 ## 12. Persistence
 
-The state file (default `./.diversity-classifier.json`, overridable with
-`--state`) stores parsers, classifiers, alarms, tool-added sources and
-notification settings. It is written atomically (temp file + rename),
-debounced. Events, clusters and metrics are not persisted.
+Everything the agent defines persists across runs. The next session starts
+with the server already classifying and alarming, and does not need to relearn
+the logs.
+
+**Persisted:** parsers, classifiers, alarms, tool-added sources, notification
+settings, and cluster **dismissals** (section 11). Also persisted: the
+`new_value` alarms' seen-sets (capped), so a restart does not re-fire on every
+known value.
+
+**Not persisted:** events, clusters, metrics, alarm history. These are runtime
+data. Restarting gives a clean window.
+
+**Layers**, loaded in order, with later layers overriding earlier ones by name:
+
+1. **Global**: `$XDG_CONFIG_HOME/diversity-classifier/global.json`. This holds
+   reusable parsers and heads (`head`, `hostport`, nginx/syslog envelopes) that
+   are shared by every project.
+2. **Project**: `./.diversity-classifier.json` (or `--state <path>`). This is
+   the server's working directory, which is the project when launched by Claude
+   Code.
+
+Each definition tool takes `scope: "project" | "global"` (default `project`) to
+choose which file it writes to. `list_*` tools show each definition's scope.
+
+**Writes** happen on every definition change. They are debounced (200 ms) and
+atomic (temp file + rename). The format is versioned JSON
+(`{ "version": 1, "parsers": [...], ... }`) and is designed to be readable,
+diffable and committable. The project file can be checked into a repo, so the
+team shares the same classifier pack.
+
+**Loading** at startup compiles every definition. An invalid definition (for
+example, one that references a deleted parser) is loaded as `disabled` with an
+`error`, not dropped. It is reported in `stats` and in the first notification,
+so the agent can fix it.
+
+**External edits**: the files are watched. A manual edit is reloaded live and
+the change is announced through a `source`-kind notification.
 
 ## 13. Configuration
 
@@ -431,6 +512,7 @@ as constants in `src/config`:
 | `DIGEST_MAX_WAIT_MS` | 60000 |
 | `ALARM_HISTORY` | 500 |
 | `STATE_FILE` | `./.diversity-classifier.json` |
+| `GLOBAL_STATE_FILE` | `$XDG_CONFIG_HOME/diversity-classifier/global.json` |
 
 ## 14. Non-goals (v1)
 
