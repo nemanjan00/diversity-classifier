@@ -231,9 +231,53 @@ With `envelope: true`:
 
 ### 5.5 Retroactive classification
 
-Defining a classifier re-runs it over the retained unclassified buffer. Matched
-records move out of their clusters and become events. The tool result reports
-how many records were absorbed.
+Defining a classifier (or parser) immediately runs it over **every retained
+unclassified record**, not only over new lines.
+
+* **Buffer.** The unclassified ring buffer keeps the full record: the raw text,
+  the original ingest time, `$source`/`$labels` and any envelope fields
+  already extracted. Clusters keep counts beyond what the buffer retains.
+* **What runs.** Only the new or changed classifier, plus its sub-classifiers,
+  runs over the buffer. Existing classifiers have already rejected these
+  records, so they are skipped. For a new child of an envelope, only records
+  that sit unclassified *under that envelope* are tried, and they are matched
+  against the stored body.
+* **Priority.** If the new classifier has a lower priority than one that would
+  also match a later line, the result is the same as for live data, because
+  each record is still classified once.
+* **Effects on matched records.**
+  * They become events with their **original timestamps**, so histograms and
+    timeseries show the past correctly.
+  * They update metrics and all-time aggregates.
+  * They leave the buffer.
+  * Their clusters' counts go down, and a cluster that reaches 0 is deleted.
+    The counts beyond the buffer that cannot be re-checked move into a
+    `backlog` number on the classifier, so totals still add up.
+* **Alarms do not fire** for retroactively absorbed records. They are past
+  events, and firing on them would flood notifications on every definition.
+  `define_alarm` takes `backfill: true` to evaluate a new alarm over the
+  stored events once, and it reports what *would* have fired.
+* **Parser and head changes.** Changing a parser recompiles every classifier
+  that uses it, and each affected classifier is re-run over the buffer.
+  Records that were already classified are **not** reclassified. Use
+  `reclassify` for that.
+* **Tool result.**
+  ```jsonc
+  { "absorbed": 1834, "from_clusters": [{ "id": "c7f2", "matched": 1834, "remaining": 0 }],
+    "backlog": 42110, "sample": [{ "fields": { ... } }],
+    "unclassified_ratio": { "before": 0.41, "after": 0.12 } }
+  ```
+  The agent sees at once how much of the noise the definition removed.
+* **Size.** The buffer is bounded (`UNCLASSIFIED_BUFFER`). Re-runs execute in
+  chunks off the ingest path, so live lines keep flowing during a long re-run.
+  Re-runs are cheap anyway, since the prefilter rejects most records with a
+  single `includes`.
+
+`reclassify` (tool) rebuilds events from the retained raw records of a
+classifier subtree, or of everything. It is used after re-ordering priorities
+or editing a template, when existing events should follow the new definition.
+Only records with `store: "full"` still have raw text, so only they can be
+reclassified.
 
 ### 5.6 Dry run
 
@@ -434,7 +478,8 @@ so multiline records from different streams never interleave.
 | `define_parser` / `remove_parser` / `list_parsers` | Custom types. `list_parsers` includes built-ins. |
 | `test_classifier` | Dry run (section 5.6). |
 | `define_classifier` | Create or replace. Returns absorbed count and sample fields. |
-| `remove_classifier` | Removes it and its sub-classifiers. Events are dropped. |
+| `remove_classifier` | Removes it and its sub-classifiers. Events with raw text go back to the unclassified buffer and clusters. |
+| `reclassify` | Re-run classification over retained raw records (section 5.5). |
 | `list_classifiers` | Definitions with counts and rates. |
 | `search_events` | Section 7.2. |
 | `histogram` | Section 7.2. |
