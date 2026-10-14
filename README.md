@@ -248,6 +248,37 @@ Tuning goes through env vars (`DC_EVENTS_TOTAL`, `DC_UNCLASSIFIED_BUFFER`,
   startup. The agent (or you) resumes them with `start_source`, or you opt in
   with `--resume-sources`.
 
+## Where the agent can get hurt
+
+Some traps can't be fixed by the tool because the data itself is
+ambiguous. They're listed here, and in the server instructions every agent
+reads, so they get treated with care:
+
+- **Absence is not health.** A quiet period can mean nothing happened, or that
+  the component that would log is stuck or dead (no "acquired" lines while
+  nobody acquires anything). Silence has to be explained with other evidence:
+  source health, `last_seen` of related classifiers, the events that *should*
+  accompany it.
+- **Empty can be your filter.** A gap under a `q`/`where`/classifier/time
+  filter may only exist in the filtered view. Re-run without the filter before
+  concluding anything.
+- **Retention.** Queries see retained events only (`retained_since`); older
+  data exists only as counters and aggregates.
+- **Restarts forget.** Events, the queue and metrics live in memory.
+  Definitions and `new_value` history persist, evidence does not. Writing raw
+  logs to disk is a deliberate non-goal.
+- **Catch-all classifiers** absorb every future variant too, so new message
+  shapes never reach the queue. Prefer one typed template per message kind.
+- **Count-only classifiers** keep no events. **Retro-absorbed** records never
+  fire alarms.
+- **Multi-line records** are only joined when configured, and some formats
+  can't be joined reliably at all. Unjoined fragments appear as separate
+  clusters.
+- **Time.** Zone-less timestamps are read as local time unless the type says
+  otherwise (`{ts:timestamp(utc)}`).
+- **Redaction** is pattern-based. It catches common credential shapes, not
+  everything sensitive.
+
 ## Limits (by design)
 
 This is a developer tool, not a log store. Events live in bounded ring buffers

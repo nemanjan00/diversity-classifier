@@ -810,6 +810,11 @@ as constants in `src/config`:
 
 ## 15. Non-goals (v1)
 
+(See also the README section "Where the agent can get hurt": ambiguities that
+are documented rather than fixed, e.g. silence vs. health, filtered vs. absent,
+retention and restarts. The same list is part of the MCP server instructions.)
+
+
 * Long-term storage and querying of historical logs (use Loki or Elastic).
 * Arbitrary JS in parsers. Converters are a fixed, safe set.
 * Production deployment, daemon mode, or running inside an application.

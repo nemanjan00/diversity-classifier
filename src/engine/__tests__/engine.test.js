@@ -344,3 +344,34 @@ describe("envelope multiline, redaction, sequences", () => {
 		}, 0)).toBe(3);
 	});
 });
+
+describe("regressions", () => {
+	test("children see the envelope body without leading whitespace", () => {
+		const engine = makeEngine(tmpDir());
+		engine.defineClassifier({ name: "p", template: "^[{worker:word}] | {msg:rest}", envelope: true });
+		engine.defineClassifier({ name: "p.ok", parent: "p", regex: "^done (?<n>\\d+)$", types: { n: "int" } });
+		engine.ingestLines(["[a] |   done 7"], "app");
+
+		const event = engine.queries.search({ classifier: "p.ok" }).events[0];
+		expect(event.fields.n).toBe(7);
+		expect(event.fields.msg).toBe("  done 7");
+		expect(engine.testClassifier({ parent: "p", regex: "^done (?<n>\\d+)$" }, { lines: ["[a] |   done 8"] }).matched).toBe(1);
+		engine.stop();
+	});
+
+	test("new_value history is saved when it changes, not only on definition changes", () => {
+		const dir = tmpDir();
+		const engine = makeEngine(dir);
+		engine.defineClassifier({ name: "login", template: "login user={user:word}" });
+		engine.defineAlarm({ name: "nv", kind: "new_value", classifier: "login", params: { field: "user" } });
+		engine.ingestLines(["login user=alice", "login user=bob"], "app");
+
+		return new Promise((resolve) => {
+			setTimeout(resolve, 400);
+		}).then(() => {
+			const saved = JSON.parse(fs.readFileSync(path.join(dir, "state.json"), "utf8"));
+			expect(saved.alarm_state.nv.seen.sort()).toEqual(["alice", "bob"]);
+			engine.stop();
+		});
+	});
+});

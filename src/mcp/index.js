@@ -19,7 +19,18 @@ Loop:
 5. Ask questions with search_events / histogram / timeseries / field_summary (q like 'status >= 500 and took > 2s').
 6. define_alarm for what matters (rate, threshold, new_value, absence, sequence, source_silent).
 7. Then stop polling: with channels enabled, digests of new unclassified clusters and alarm firings are pushed to you. Without channels, call wait {for:"any"} — it returns as soon as a new cluster, alarm or source failure happens.
-Everything you define persists for the next run. web_ui gives the human a Kibana-like explorer; define_dashboard builds them a view.`;
+Everything you define persists for the next run. web_ui gives the human a Kibana-like explorer; define_dashboard builds them a view.
+
+Where you can get hurt (tread carefully):
+- Absence is not health. No events can mean "nothing happened" or "the thing that would log is stuck". Before calling a quiet period stabilisation, check list_sources and the related classifiers' last_seen, and look for the events that should accompany the silence.
+- Empty results may be your filter. Re-run without q/where/classifier (or widen the time range) before claiming a gap.
+- Only retained events are queryable (see retained_since); older data survives only as counts/aggregates.
+- A restart/reconnect drops events, the queue and metrics (definitions and new_value history persist). Write down evidence before reconnecting.
+- Catch-all classifiers hide structure and swallow new message shapes; prefer one typed template per message kind.
+- store:"count" classifiers keep no events; retro-absorbed records never fire alarms.
+- Multi-line records are only joined if you configure multiline (envelope multiline for prefixed streams); fragments otherwise show up as separate clusters.
+- Zone-less timestamps are read as local time unless the type says otherwise ({ts:timestamp(utc)}).
+- Redaction is pattern-based, not a guarantee.`;
 
 /**
  * Create the MCP server bound to an engine.

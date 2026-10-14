@@ -281,6 +281,7 @@ const evaluateEvent = (alarm, runtime, event, test) => {
 			}
 
 			runtime.seen.add(value);
+			runtime.seenChanged = true;
 			return { value, text: p.field + " = " + value + " (new)" };
 		}
 		case "sequence": {
@@ -462,9 +463,12 @@ const createAlarms = (options) => {
 			return Array.from(alarms.values());
 		},
 
-		/** Persistable runtime bits (new_value seen sets). */
+		/** Persistable runtime bits (new_value seen sets). Clears the changed flags. */
 		persistentState: () => {
 			const out = {};
+			runtimes.forEach((runtime) => {
+				runtime.seenChanged = false;
+			});
 			alarms.forEach((alarm) => {
 				if (alarm.kind === "new_value") {
 					out[alarm.name] = { seen: Array.from(runtimes.get(alarm.name).seen).slice(-SEEN_CAP) };
@@ -476,6 +480,10 @@ const createAlarms = (options) => {
 
 		/** Live classified event. */
 		onEvent: (event) => {
+			const changedBefore = Array.from(runtimes.values()).some((runtime) => {
+				return runtime.seenChanged;
+			});
+
 			alarms.forEach((alarm) => {
 				if (!alarm.enabled || alarm.kind === "unclassified" || alarm.kind === "source_silent") {
 					return;
@@ -488,6 +496,14 @@ const createAlarms = (options) => {
 					fire(alarm, runtime, result, event);
 				}
 			});
+
+			const changedNow = Array.from(runtimes.values()).some((runtime) => {
+				return runtime.seenChanged;
+			});
+
+			if (changedNow && !changedBefore && options.onStateChange) {
+				options.onStateChange();
+			}
 		},
 
 		/** Live unclassified record. */

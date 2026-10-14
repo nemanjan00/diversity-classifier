@@ -113,6 +113,14 @@ const serialise = (def) => {
 	return out;
 };
 
+/**
+ * Text an envelope hands to its children: the body without leading spaces/tabs.
+ * The envelope field itself (and multiline detection) keep the original indentation.
+ */
+const childBody = (body) => {
+	return String(body).replace(/^[ \t]+/, "");
+};
+
 const sourceMatches = (patterns, source) => {
 	if (!patterns) {
 		return true;
@@ -243,7 +251,7 @@ const createClassifiers = (patterns) => {
 
 		if (parent.def.envelope) {
 			const body = fields[parent.def.body];
-			return body === undefined || body === null ? null : String(body);
+			return body === undefined || body === null ? null : childBody(body);
 		}
 
 		return raw;
@@ -517,6 +525,7 @@ const createClassifiers = (patterns) => {
 
 module.exports = {
 	createClassifiers,
+	childBody,
 	normalise,
 	serialise,
 	STORE_LEVELS

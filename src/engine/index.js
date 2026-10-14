@@ -2,6 +2,7 @@ const EventEmitter = require("events");
 
 const createPatterns = require("../patterns").createPatterns;
 const createClassifiers = require("../classifier").createClassifiers;
+const childBody = require("../classifier").childBody;
 const serialiseClassifier = require("../classifier").serialise;
 const createClusterer = require("../clusterer").createClusterer;
 const createMetrics = require("../metrics").createMetrics;
@@ -628,7 +629,19 @@ const createEngine = (options) => {
 				cursor = cursor.parentNode;
 			}
 
-			const textFor = (raw) => {
+			const textFor = (record) => {
+				const assembled = record.assembled;
+
+				if (assembled && def.parent === assembled.envelope && !def.on) {
+					const envelopeNode = classifiers.get(assembled.envelope);
+					const body = envelopeNode ? assembled.fields[envelopeNode.def.body] : undefined;
+
+					if (body !== undefined && body !== null) {
+						return { text: childBody(body), inherited: assembled.fields };
+					}
+				}
+
+				const raw = record.raw;
 				let fields = {};
 				let text = raw;
 				let parentNode = null;
@@ -637,7 +650,7 @@ const createEngine = (options) => {
 						return false;
 					}
 
-					const nodeText = parentNode ? (node.def.on ? fields[node.def.on] : (parentNode.def.envelope ? fields[parentNode.def.body] : raw)) : raw;
+					const nodeText = parentNode ? (node.def.on ? fields[node.def.on] : (parentNode.def.envelope ? childBody(fields[parentNode.def.body]) : raw)) : raw;
 
 					if (nodeText === undefined || nodeText === null) {
 						return false;
@@ -662,7 +675,7 @@ const createEngine = (options) => {
 					if (def.on) {
 						text = fields[def.on];
 					} else if (parentNode.def.envelope) {
-						text = fields[parentNode.def.body];
+						text = childBody(fields[parentNode.def.body]);
 					}
 				}
 
@@ -694,7 +707,7 @@ const createEngine = (options) => {
 			const clustersHit = new Map();
 
 			samples.forEach((record) => {
-				const target = textFor(record.raw);
+				const target = textFor(record);
 
 				if (!target) {
 					if (parentMisses.length < NEAR_MISSES) {
@@ -1388,6 +1401,9 @@ const createEngine = (options) => {
 	alarms = createAlarms({
 		historySize: settings.ALARM_HISTORY,
 		now,
+		onStateChange: () => {
+			persist();
+		},
 		sourceActivity: (pattern) => {
 			return sources.activity(pattern);
 		},
