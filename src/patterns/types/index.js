@@ -116,6 +116,35 @@ const CLF_TS = "\\d{2}/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/\\d{4
 const EPOCH = "\\d{13}|\\d{10}(?:\\.\\d+)?";
 const NUMBER = "[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][-+]?\\d+)?";
 
+/** Zone-less timestamps: apply an explicit zone from the type argument (utc, local, +02:00). */
+const withZone = (args) => {
+	const zone = args && args[0] ? String(args[0]).trim() : "";
+
+	if (!zone || zone === "local") {
+		return null;
+	}
+
+	if (/^utc|z$/i.test(zone)) {
+		return "Z";
+	}
+
+	if (/^[+-]\d{2}:?\d{2}$/.test(zone)) {
+		return zone.length === 5 ? zone.slice(0, 3) + ":" + zone.slice(3) : zone;
+	}
+
+	throw new Error("timestamp zone must be utc, local or ±HH:MM");
+};
+
+const zoned = (text, args) => {
+	const zone = withZone(args);
+
+	if (zone && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?$/.test(text.trim())) {
+		return units.parseTimestamp(text.trim() + zone);
+	}
+
+	return units.parseTimestamp(text);
+};
+
 const types = {
 	word: {
 		description: "non-whitespace run",
@@ -132,9 +161,9 @@ const types = {
 		convert: identity
 	},
 	rest: {
-		description: "everything to the end of the line (greedy)",
+		description: "everything to the end (greedy; spans lines in multiline records)",
 		regex: () => {
-			return ".*";
+			return "[\\s\\S]*";
 		},
 		convert: identity
 	},
@@ -258,26 +287,24 @@ const types = {
 		convert: identity
 	},
 	iso8601: {
-		description: "ISO-8601 timestamp → epoch ms",
+		description: "ISO-8601 timestamp → epoch ms; iso8601(utc|local|±HH:MM) sets the zone for zone-less values (default local)",
 		numeric: true,
 		time: true,
-		regex: () => {
+		regex: (args) => {
+			withZone(args);
 			return ISO;
 		},
-		convert: (text) => {
-			return units.parseTimestamp(text);
-		}
+		convert: zoned
 	},
 	timestamp: {
-		description: "ISO-8601, 'YYYY-MM-DD HH:MM:SS', syslog 'Mmm dd HH:MM:SS', CLF 'dd/Mmm/YYYY:HH:MM:SS +zzzz', epoch s/ms → epoch ms",
+		description: "ISO-8601, 'YYYY-MM-DD HH:MM:SS', syslog 'Mmm dd HH:MM:SS', CLF 'dd/Mmm/YYYY:HH:MM:SS +zzzz', epoch s/ms → epoch ms; timestamp(utc|local|±HH:MM) sets the zone for zone-less values (default local)",
 		numeric: true,
 		time: true,
-		regex: () => {
+		regex: (args) => {
+			withZone(args);
 			return ISO + "|" + CLF_TS + "|" + SYSLOG_TS + "|" + EPOCH;
 		},
-		convert: (text) => {
-			return units.parseTimestamp(text);
-		}
+		convert: zoned
 	},
 	duration: {
 		description: "250ms, 1.5s, 2m, 1h30m, 15us, 300ns → milliseconds",

@@ -41,3 +41,22 @@ describe("config", () => {
 		expect(config.parseHttp("0.0.0.0:80")).toEqual({ host: "0.0.0.0", port: 80 });
 	});
 });
+
+describe("state file default", () => {
+	test("defaults to .claude/ unless a legacy root file exists", () => {
+		const fs = require("fs");
+		const os = require("os");
+		const path = require("path");
+		const cwd = process.cwd();
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dc-cfg-"));
+		process.chdir(dir);
+
+		try {
+			expect(config.resolve([], {}).settings.STATE_FILE).toBe(path.join(".claude", "diversity-classifier.json"));
+			fs.writeFileSync(".diversity-classifier.json", "{}");
+			expect(config.resolve([], {}).settings.STATE_FILE).toBe(".diversity-classifier.json");
+		} finally {
+			process.chdir(cwd);
+		}
+	});
+});

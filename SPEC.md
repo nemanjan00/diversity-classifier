@@ -96,7 +96,7 @@ When `hostport` is a template parser, this match yields fields `ts`, `level`,
 |---|---|---|
 | `word` | `\S+` | string |
 | `text` | lazy `.*?` | string |
-| `rest` | greedy `.*` to end | string |
+| `rest` | everything to the end, spanning lines in multiline records; whitespace written right before it matches exactly, so the remainder keeps its own indentation | string |
 | `int` | `[-+]?\d+` | number |
 | `float` / `number` | decimal or scientific | number |
 | `hex` | `(0x)?[0-9a-fA-F]+` | string |
@@ -106,8 +106,8 @@ When `hostport` is a template parser, this match yields fields `ts`, `level`,
 | `host` | hostname or IP | string |
 | `port` | 1-65535 | number |
 | `email`, `url`, `path` | as named | string |
-| `iso8601` | ISO-8601 timestamp | epoch ms |
-| `timestamp` | ISO-8601, `YYYY-MM-DD HH:MM:SS[.fff]`, syslog `Mmm dd HH:MM:SS`, epoch s/ms | epoch ms |
+| `iso8601` | ISO-8601 timestamp; `iso8601(utc\|local\|±HH:MM)` sets the zone of zone-less values (default local) | epoch ms |
+| `timestamp` | ISO-8601, `YYYY-MM-DD HH:MM:SS[.fff]`, syslog `Mmm dd HH:MM:SS`, CLF, epoch s/ms; same zone argument | epoch ms |
 | `duration` | `250ms`, `1.5s`, `2m`, `1h30m`, `µs`/`us`/`ns` | ms (number) |
 | `bytes` | `512`, `12KB`, `3.4MiB`, `1G` | bytes (number) |
 | `level` | trace/debug/info/notice/warn(ing)/err(or)/crit(ical)/fatal/panic, any case | normalised lowercase |
@@ -228,6 +228,27 @@ With `envelope: true`:
   envelope, which wraps a leaf.
 * Several envelopes may coexist, one per log format or source. The first
   matching envelope by priority wins, as with any top-level classifier.
+
+#### Envelope multiline
+
+Prefixed streams (container/task/pod prefixes, syslog heads) break source-level
+multiline rules, because the continuation marker is behind the prefix. An
+envelope can therefore join continuation lines **by body**:
+
+```jsonc
+{ "name": "app", "template": "^[{worker:word}] {msg:rest}", "envelope": true,
+  "multiline": { "continue": "^\\s+at |^\\s*}", "group_by": ["worker"], "flush_ms": 300 } }
+```
+
+* `start` (a body that does *not* match continues the record) or `continue`
+  (a body that matches continues it).
+* Pending records are keyed by envelope + source + labels + the `group_by`
+  field values, so interleaved streams never mix.
+* The joined record has `raw` = the joined lines, and `body` = the joined
+  bodies. Children classify it as one record; `{x:rest}` spans the lines.
+* Queue entries and events remember that they were assembled, so retroactive
+  classification, `reclassify` and classifier removal continue them from
+  the envelope instead of re-parsing the joined raw text.
 
 ### 5.5 Retroactive classification
 
@@ -407,6 +428,11 @@ All queries take `q`/`where`, `classifier` (glob) and a time range
 * **fields**: the field catalogue of a classifier subtree, i.e. name, type,
   where it comes from (head, parser, child) and presence. Used for
   autocomplete.
+* **sequences**: ad-hoc counterpart of the `sequence` alarm. For each event
+  of `first`, it finds the next event of `then` with the same `key` value and
+  reports gap statistics overall and per key, unmatched counts and recent
+  pairs.
+* **count**: number of matching retained events.
 * **stats**: overview of totals, classified ratio, rate per classifier
   (1m/5m/1h), top clusters, alarm states, source health.
 
@@ -534,6 +560,19 @@ so multiline records from different streams never interleave.
 > (MCP or web), for setups where the agent should only see pre-configured
 > streams.
 
+### 10.2 Redaction
+
+Every record is redacted **at ingest**, before classification, so secrets
+never reach clusters, examples, events, notifications or the UI. It is on by
+default, with builtins `bearer`, `basic_auth`, `url_credentials`,
+`secret_kv` (`password=`, `token:`, `api_key=` …), `jwt` and
+`private_key_block`. `set_redaction` chooses builtins, adds regexes or turns
+redaction off; the settings persist.
+
+Classifiers can additionally list `redact: ["field", …]`. Those field values
+are masked in stored events, and their occurrences in the stored raw line are
+masked too.
+
 ## 11. MCP surface
 
 ### Tools
@@ -558,6 +597,9 @@ so multiline records from different streams never interleave.
 | `search_unclassified` | `q`/`where` search over raw buffered unclassified records (envelope fields included). |
 | `ignore_cluster` | Shortcut: turn a cluster's suggested template into an `ignore.<id>` classifier with `store: "count"`, which removes it from the queue (section 6). |
 | `set_notifications` | Mute, unmute, debounce timing. |
+| `set_redaction` | Ingest-time redaction builtins/patterns, with a `test` preview (section 10.2). |
+| `sequences` / `count` | Section 7.3. |
+| `wait` | Block until a new cluster, alarm, N records/events or a source failure (for clients without channel notifications). |
 | `fields` / `field_summary` / `heatmap` | Section 7.3. |
 | `define_visualization` / `define_dashboard` / `remove_view` / `list_views` | Saved charts and dashboards for the web UI (section 13.4). Returns a UI link. |
 | `web_ui` | Start the web UI on demand (if not started with `--http`) and return its URL. |
@@ -604,7 +646,8 @@ data. Restarting gives a clean window.
 1. **Global**: `$XDG_CONFIG_HOME/diversity-classifier/global.json`. This holds
    reusable parsers and heads (`head`, `hostport`, nginx/syslog envelopes) that
    are shared by every project.
-2. **Project**: `./.diversity-classifier.json` (or `--state <path>`). This is
+2. **Project**: `./.claude/diversity-classifier.json` (an existing
+   `./.diversity-classifier.json` keeps being used; or `--state <path>`). This is
    the server's working directory, which is the project when launched by Claude
    Code.
 
@@ -760,7 +803,7 @@ as constants in `src/config`:
 | `ALARM_HISTORY` | 500 |
 | `HTTP` | off |
 | `HTTP_TOKEN` | none (required for non-loopback bind) |
-| `STATE_FILE` | `./.diversity-classifier.json` |
+| `STATE_FILE` | `./.claude/diversity-classifier.json` (legacy `./.diversity-classifier.json` if present) |
 | `GLOBAL_STATE_FILE` | `$XDG_CONFIG_HOME/diversity-classifier/global.json` |
 
 ## 15. Non-goals (v1)

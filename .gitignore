@@ -2,3 +2,4 @@ node_modules/
 .diversity-classifier.json
 coverage/
 *.log
+.claude/diversity-classifier.json

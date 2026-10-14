@@ -29,6 +29,22 @@ const normalise = (def) => {
 		throw new Error("'on' only applies to sub-classifiers (set parent)");
 	}
 
+	if (def.multiline) {
+		if (!def.envelope) {
+			throw new Error("multiline only applies to envelope classifiers (it joins envelope bodies)");
+		}
+
+		if (!def.multiline.start === !def.multiline.continue) {
+			throw new Error("multiline needs exactly one of start or continue (regex over the envelope body)");
+		}
+
+		new RegExp(def.multiline.start || def.multiline.continue);
+	}
+
+	if (def.redact && !Array.isArray(def.redact)) {
+		throw new Error("redact must be a list of field names");
+	}
+
 	const out = {
 		name: def.name,
 		description: def.description || "",
@@ -42,6 +58,14 @@ const normalise = (def) => {
 		envelope: !!def.envelope,
 		body: def.envelope ? (def.body || DEFAULT_BODY) : null,
 		enabled: def.enabled !== false,
+		multiline: def.multiline ? {
+			start: def.multiline.start || null,
+			continue: def.multiline.continue || null,
+			group_by: def.multiline.group_by ? [].concat(def.multiline.group_by) : [],
+			flush_ms: def.multiline.flush_ms || 300,
+			max_lines: def.multiline.max_lines || 500
+		} : null,
+		redact: def.redact && def.redact.length ? def.redact.slice() : null,
 		scope: def.scope || "project"
 	};
 
@@ -60,9 +84,9 @@ const normalise = (def) => {
 const serialise = (def) => {
 	const out = { name: def.name };
 	const keys = ["template", "regex", "flags", "types", "description", "priority", "sources", "time_field",
-		"store", "tags", "parent", "on", "envelope", "body", "enabled"];
+		"store", "tags", "parent", "on", "envelope", "body", "multiline", "redact", "enabled"];
 	const defaults = { description: "", priority: 0, sources: null, time_field: null, store: "full", parent: null,
-		on: null, envelope: false, body: null, enabled: true, flags: "" };
+		on: null, envelope: false, body: null, enabled: true, flags: "", multiline: null, redact: null };
 
 	keys.forEach((key) => {
 		const value = def[key];
@@ -225,7 +249,11 @@ const createClassifiers = (patterns) => {
 		return raw;
 	};
 
-	const descend = (node, fields, path, record) => {
+	const descend = (node, fields, path, record, assembled) => {
+		if (node.def.multiline && !assembled) {
+			return { node, path, fields, pause: true };
+		}
+
 		const found = node.children.reduce((acc, child) => {
 			if (acc) {
 				return acc;
@@ -245,7 +273,29 @@ const createClassifiers = (patterns) => {
 			return { node, path, fields };
 		}
 
-		return descend(found.child, Object.assign({}, fields, found.m.fields), path.concat([found.child.name]), record);
+		return descend(found.child, Object.assign({}, fields, found.m.fields), path.concat([found.child.name]), record, assembled);
+	};
+
+	const finish = (result) => {
+		const time = timeFor(result.node, result.fields);
+
+		if (result.pause) {
+			return { multiline: true, classified: false, node: result.node, path: result.path, fields: result.fields, time };
+		}
+
+		if (result.node.def.envelope) {
+			return {
+				classified: false,
+				node: result.node,
+				path: result.path,
+				fields: result.fields,
+				time,
+				envelope: { name: result.node.name, path: result.path, fields: result.fields },
+				body: String(result.fields[result.node.def.body] === undefined ? "" : result.fields[result.node.def.body])
+			};
+		}
+
+		return { classified: true, node: result.node, path: result.path, fields: result.fields, time };
 	};
 
 	const timeFor = (node, fields) => {
@@ -283,22 +333,30 @@ const createClassifiers = (patterns) => {
 				return null;
 			}
 
-			const result = descend(top.node, top.m.fields, [top.node.name], record);
-			const time = timeFor(result.node, result.fields);
+			return finish(descend(top.node, top.m.fields, [top.node.name], record, false));
+		},
 
-			if (result.node.def.envelope) {
-				return {
-					classified: false,
-					node: result.node,
-					path: result.path,
-					fields: result.fields,
-					time,
-					envelope: { name: result.node.name, path: result.path, fields: result.fields },
-					body: String(result.fields[result.node.def.body] === undefined ? "" : result.fields[result.node.def.body])
-				};
+		/**
+		 * Continue classification below an envelope with already-extracted fields
+		 * (an assembled multiline record: fields[body] holds the joined body).
+		 * Returns null if the envelope no longer exists or is unusable.
+		 */
+		continueFrom: (envelopeName, fields, record) => {
+			const node = state.nodes.get(envelopeName);
+
+			if (!node || !usable(node) || !node.def.envelope) {
+				return null;
 			}
 
-			return { classified: true, node: result.node, path: result.path, fields: result.fields, time };
+			const path = [];
+			let cursor = node;
+
+			while (cursor) {
+				path.unshift(cursor.name);
+				cursor = cursor.parentNode;
+			}
+
+			return finish(descend(node, fields, path, record, true));
 		},
 
 		/** Validate a definition without storing it. Returns { def, compiled } or throws. */

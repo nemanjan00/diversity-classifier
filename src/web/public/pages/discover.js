@@ -227,6 +227,53 @@ const EventsView = () => {
 	const events = resource(() => {
 		return api("search_events", queryArgs({ classifier: classifierArg(), limit: limit.n }));
 	});
+	/** When the range is empty: are there matching events outside it, and is this a count-only classifier? */
+	const outside = resource(() => {
+		if (!events.data || events.data.total > 0) {
+			return Promise.resolve(null);
+		}
+
+		const args = queryArgs({ classifier: classifierArg(), limit: 1 });
+		delete args.since;
+		delete args.until;
+		return Promise.all([
+			api("search_events", args),
+			api("search_events", Object.assign({}, args, { order: "asc" })),
+			view.c ? api("list_classifiers", { classifier: view.c }) : Promise.resolve(null)
+		]).then((results) => {
+			const node = results[2] ? results[2].classifiers.find((c) => {
+				return c.name === view.c;
+			}) : null;
+			return Object.freeze({
+				total: results[0].total,
+				newest: results[0].events[0] ? Date.parse(results[0].events[0].t) : null,
+				oldest: results[1].events[0] ? Date.parse(results[1].events[0].t) : null,
+				countOnly: !!(node && node.store === "count"),
+				count: node ? node.count : 0
+			});
+		});
+	});
+
+	const emptyState = () => {
+		const info = outside.data;
+
+		if (info && info.countOnly) {
+			return Empty(EmptyHeader(EmptyTitle("Counts only"), EmptyDescription(
+				view.c + " uses store: \"count\", so it keeps counters and field aggregates (" + formatNumber(info.count) +
+				" so far) but no individual events. Change its store to \"full\" in the classifier editor to keep events.")));
+		}
+
+		if (info && info.total > 0) {
+			return Empty(EmptyHeader(EmptyTitle("No events in this time range"), EmptyDescription(
+				formatNumber(info.total) + " matching events are retained outside it (" + formatTime(info.oldest, true) + " … " + formatTime(info.newest, true) +
+				"). Event time comes from the classifier's time_field when set; zone-less timestamps are read as local time unless the type says otherwise, e.g. {ts:timestamp(utc)}.")),
+			Button({ size: "sm", onclick: () => {
+				setAbsoluteRange(info.oldest - 1000, info.newest + 1000);
+			} }, "Show all retained events"));
+		}
+
+		return Empty(EmptyHeader(EmptyTitle("No events"), EmptyDescription("Nothing matches this query and time range. Widen the range, clear filters, or check the Unclassified queue.")));
+	};
 
 	return el("div", { class: "dc-discover" },
 		FieldSidebar(summary),
@@ -287,7 +334,7 @@ const EventsView = () => {
 				}
 
 				if (!events.data.events.length) {
-					return Empty(EmptyHeader(EmptyTitle("No events"), EmptyDescription("Nothing matches this query and time range. Widen the range, clear filters, or check the Unclassified queue.")));
+					return emptyState();
 				}
 
 				return null;
@@ -390,7 +437,8 @@ export const DiscoverPage = () => {
 			() => {
 				const data = classifiers.data;
 				return data ? data.classifiers.map((c) => {
-					return NativeSelectOption({ value: c.name, selected: c.name === view.c }, c.name + " (" + formatNumber(c.count) + ")");
+					const label = c.store === "count" ? formatNumber(c.count) + " · counts only" : formatNumber(c.count);
+					return NativeSelectOption({ value: c.name, selected: c.name === view.c }, c.name + " (" + label + ")");
 				}) : null;
 			}),
 			el("div", { class: "dc-seg" },

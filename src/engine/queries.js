@@ -3,6 +3,7 @@ const compileWhere = require("../utils/filter").compileWhere;
 const combineQuery = require("../utils/query").combine;
 const parseTime = require("../utils/units").parseTime;
 const parseDuration = require("../utils/units").parseDuration;
+const autoInterval = require("../utils/units").autoInterval;
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 1000;
@@ -137,6 +138,17 @@ const createQueries = (parts) => {
 				throw new Error("Cannot parse interval: " + a.interval);
 			}
 
+			const countOnly = a.classifier && !Array.isArray(a.classifier) && classifiers.get(a.classifier) &&
+				metrics.storedCount(sel.names) === 0 && !sel.filtered && !a.split_by && (!a.agg || a.agg === "count");
+
+			if (countOnly) {
+				const to = sel.until !== undefined ? sel.until : Date.now();
+				const from = sel.since !== undefined ? sel.since : to - 3600000;
+				const step = interval || autoInterval(to - from, 60);
+				const series = metrics.countSeries(a.classifier, from, to, step);
+				return { source: "aggregate counters (last hour; no events stored)", interval: step, agg: "count", field: null, times: series.times, series: [{ key: "all", values: series.values }] };
+			}
+
 			return Object.assign({ retained_since: retainedInfo(sel.names) }, compute.timeseries(sel.events, {
 				since: sel.since,
 				until: sel.until,
@@ -246,6 +258,101 @@ const createQueries = (parts) => {
 						fields: record.envelope ? record.envelope.fields : undefined,
 						raw: record.raw
 					};
+				})
+			};
+		},
+
+		/**
+		 * Ad-hoc sequence analysis: gaps between an event of `first` and the next
+		 * event of `then` sharing the same `key` value (or globally without key).
+		 * @param {{ first: string, then: string, key?: string, within?: string, q?: string, where?: object,
+		 *   since?: *, until?: *, top?: number }} args
+		 */
+		sequences: (args) => {
+			const a = args || {};
+
+			if (!a.first || !a.then) {
+				throw new Error("sequences needs first and then (classifier names/globs)");
+			}
+
+			const withinMs = a.within ? parseDuration(a.within) : null;
+
+			if (a.within && !withinMs) {
+				throw new Error("Cannot parse within: " + a.within);
+			}
+
+			const sel = select(Object.assign({}, a, { classifier: [a.first, a.then] }));
+			const firstNames = new Set(classifiers.resolve(a.first));
+			const thenNames = new Set(classifiers.resolve(a.then));
+			const inSet = (set, event) => {
+				return event.path.some((name) => {
+					return set.has(name);
+				});
+			};
+			const keyOf = (event) => {
+				if (!a.key) {
+					return "*";
+				}
+
+				const value = compute.getField(event, a.key);
+				return value === undefined || value === null ? null : String(value);
+			};
+			const pending = new Map();
+			const pairs = [];
+			let unmatched = 0;
+
+			sel.events.slice().sort((x, y) => {
+				return x.t - y.t;
+			}).forEach((event) => {
+				const key = keyOf(event);
+
+				if (key === null) {
+					return;
+				}
+
+				if (inSet(thenNames, event) && pending.has(key)) {
+					const start = pending.get(key);
+					const gap = event.t - start.t;
+					pending.delete(key);
+
+					if (withinMs === null || gap <= withinMs) {
+						pairs.push({ key, gap, from: start, to: event });
+					} else {
+						unmatched++;
+					}
+				}
+
+				if (inSet(firstNames, event)) {
+					if (pending.has(key)) {
+						unmatched++;
+					}
+
+					pending.set(key, event);
+				}
+			});
+
+			const byKey = new Map();
+			pairs.forEach((pair) => {
+				if (!byKey.has(pair.key)) {
+					byKey.set(pair.key, []);
+				}
+
+				byKey.get(pair.key).push(pair.gap);
+			});
+
+			return {
+				pairs: pairs.length,
+				first_without_then: unmatched + pending.size,
+				gap_ms: compute.numericStats(pairs.map((pair) => {
+					return pair.gap;
+				})),
+				by_key: a.key ? Array.from(byKey.entries()).sort((x, y) => {
+					return y[1].length - x[1].length;
+				}).slice(0, a.top || 20).map((entry) => {
+					return Object.assign({ key: entry[0] }, compute.numericStats(entry[1]));
+				}) : undefined,
+				recent: pairs.slice(-10).reverse().map((pair) => {
+					return { key: pair.key, gap_ms: pair.gap, from: new Date(pair.from.t).toISOString(), to: new Date(pair.to.t).toISOString(), from_id: pair.from.id, to_id: pair.to.id };
 				})
 			};
 		},

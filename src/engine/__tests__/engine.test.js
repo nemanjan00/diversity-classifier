@@ -250,3 +250,97 @@ describe("engine.wait", () => {
 		});
 	});
 });
+
+describe("envelope multiline, redaction, sequences", () => {
+	let engine = null;
+
+	beforeEach(() => {
+		engine = makeEngine(tmpDir());
+		engine.defineClassifier({
+			name: "w",
+			template: "^[{worker:word}] {msg:rest}",
+			envelope: true,
+			multiline: { continue: "^\\s+at |^\\s*\\}", group_by: ["worker"] }
+		});
+	});
+
+	afterEach(() => {
+		engine.stop();
+	});
+
+	test("continuation bodies join per worker even when streams interleave", () => {
+		engine.defineClassifier({ name: "w.err", parent: "w", template: "^Error: {message:text}\n{stack:rest}" });
+		engine.ingestLines([
+			"[a] Error: boom",
+			"[b] Error: bang",
+			"[a]     at one()",
+			"[b]     at uno()",
+			"[a]     at two()",
+			"[a] next message"
+		], "app");
+
+		const events = engine.queries.search({ classifier: "w.err", order: "asc" }).events;
+		expect(events.length).toBe(2);
+		expect(events[0].fields).toMatchObject({ worker: "a", message: "boom" });
+		expect(events[0].fields.stack).toBe("    at one()\n    at two()");
+		expect(events[0].raw.split("\n").length).toBe(3);
+		expect(events[1].fields.stack).toBe("    at uno()");
+
+		const queue = engine.getUnclassified({});
+		expect(queue.clusters.map((cluster) => {
+			return cluster.shape;
+		})).toEqual(["next message"]);
+	});
+
+	test("assembled records stay assembled through retro classification", () => {
+		engine.ingestLines(["[a] Error: late", "[a]     at deep()", "[a] other"], "app");
+		expect(engine.getUnclassified({}).queue.records).toBe(2);
+
+		const result = engine.defineClassifier({ name: "w.err", parent: "w", template: "^Error: {message:text}\n{stack:rest}" });
+		expect(result.retro.absorbed).toBe(1);
+		expect(engine.queries.search({ classifier: "w.err" }).events[0].fields.stack).toBe("    at deep()");
+	});
+
+	test("ingest-time redaction and per-field redaction", () => {
+		engine.defineClassifier({ name: "w.req", parent: "w", template: "GET {url:url} user={user:word}", redact: ["user"] });
+		engine.ingestLines([
+			"[a] GET https://bob:hunter2@example.com/x user=alice",
+			"[a] auth header Authorization: Bearer abcdefghijklmnop token=s3cr3t"
+		], "app");
+
+		const event = engine.queries.search({ classifier: "w.req" }).events[0];
+		expect(event.raw).toBe("[a] GET https://[REDACTED]@example.com/x user=[REDACTED]");
+		expect(event.fields.user).toBe("[REDACTED]");
+
+		const queued = engine.queries.unclassifiedRecords({}).records[0].raw;
+		expect(queued).toBe("[a] auth header Authorization: Bearer [REDACTED] token=[REDACTED]");
+
+		const preview = engine.setRedaction({ patterns: ["acct-\\d+"], test: "id acct-123" });
+		expect(preview.test).toBe("id [REDACTED]");
+	});
+
+	test("sequences measure per-key gaps", () => {
+		engine.defineClassifier({ name: "w.start", parent: "w", template: "job start" });
+		engine.defineClassifier({ name: "w.done", parent: "w", template: "job done" });
+		engine.ingestLines(["[a] job start", "[b] job start", "[a] job done", "[b] job done", "[a] job start"], "app");
+
+		const result = engine.queries.sequences({ first: "w.start", then: "w.done", key: "worker" });
+		expect(result.pairs).toBe(2);
+		expect(result.first_without_then).toBe(1);
+		expect(result.by_key.map((entry) => {
+			return entry.key;
+		}).sort()).toEqual(["a", "b"]);
+	});
+
+	test("count-only classifiers still chart from aggregate counters", () => {
+		engine.defineClassifier({ name: "w.noise", parent: "w", template: "tick", store: "count" });
+		engine.ingestLines(["[a] tick", "[a] tick", "[b] tick"], "app");
+
+		expect(engine.queries.search({ classifier: "w.noise" }).total).toBe(0);
+		const series = engine.queries.timeseries({ classifier: "w.noise", since: "-5m" });
+		expect(series.source).toMatch(/aggregate/);
+		expect(series.series[0].values.reduce((a, b) => {
+			return a + b;
+		}, 0)).toBe(3);
+	});
+});

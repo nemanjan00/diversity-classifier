@@ -83,6 +83,7 @@ standard MCP log messages, and the agent can poll `stats` and
    histogram  { "classifier": "app.http", "field": "status" }
    timeseries { "classifier": "app.http", "q": "took > 2s", "split_by": "$labels.pod", "interval": "1m" }
    search_events { "q": "status >= 500 and not path:/health* and $source:api" }
+   sequences  { "first": "app.job_start", "then": "app.job_done", "key": "worker" }   // per-worker gap stats
    ```
 6. **Set alarms**: `rate`, `threshold` (e.g. p90 of `took` > 2s over 5m),
    `new_value` (a never-seen client id), `absence` (heartbeat stopped),
@@ -92,7 +93,7 @@ standard MCP log messages, and the agent can poll `stats` and
    alarm firings immediately. Without channels, the agent calls `wait`, which
    blocks until a new cluster, an alarm or a source failure.
 
-Everything the agent defines is **persisted** in `./.diversity-classifier.json`.
+Everything the agent defines is **persisted** in `./.claude/diversity-classifier.json`.
 You can commit it to share the classifier pack with your team. Reusable heads
 can go in a global file shared across projects. On the next run the server
 starts with the same definitions.
@@ -120,6 +121,25 @@ and then `{peer:hostport}` → `peer.host`, `peer.port`.
 **Sub-classifiers** refine a parent's field: a `http` classifier with
 `{path:path}`, plus a child `http.admin` with `on: "path"` and template
 `^/admin/{section:word}`.
+
+## Stack traces behind prefixes
+
+When every line carries a prefix (container, task, pod, worker), put the
+multiline rule on the envelope. It runs on the body, after the prefix is
+stripped, and keeps one pending record per `group_by` value:
+
+```jsonc
+{ "name": "app", "template": "^[{worker:word}] {msg:rest}", "envelope": true,
+  "multiline": { "continue": "^\\s+at |^\\s*}", "group_by": ["worker"] } }
+```
+
+## Secrets
+
+Records are redacted **before** anything is stored. Bearer/basic credentials,
+`user:pass@` in URLs, `password=`/`token=`/`api_key=` pairs, JWTs and PEM
+private keys become `[REDACTED]` by default. `set_redaction` adds patterns or
+turns it off, and classifiers can mask specific fields with
+`redact: ["field"]`.
 
 ## Multistream
 

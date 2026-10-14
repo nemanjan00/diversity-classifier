@@ -23,6 +23,7 @@ const empty = () => {
 		visualizations: [],
 		dashboards: [],
 		notifications: null,
+		redaction: null,
 		alarm_state: {}
 	};
 };
@@ -67,7 +68,7 @@ const createState = (options) => {
 	const files = { project: options.projectFile, global: options.globalFile || null };
 	const written = { project: null, global: null };
 	const log = options.log || (() => {});
-	const state = { snapshot: null, watchers: [] };
+	const state = { snapshot: null, watchers: [], pendingWatch: new Set(), watching: false };
 
 	const store = {
 		files,
@@ -124,7 +125,7 @@ const createState = (options) => {
 				const data = snapshot[scope];
 				const hasContent = SECTIONS.some((section) => {
 					return data[section] && data[section].length;
-				}) || (data.notifications && Object.keys(data.notifications).length) || Object.keys(data.alarm_state || {}).length;
+				}) || (data.notifications && Object.keys(data.notifications).length) || data.redaction || Object.keys(data.alarm_state || {}).length;
 
 				if (!hasContent && written[scope] === null) {
 					return;
@@ -139,6 +140,11 @@ const createState = (options) => {
 				try {
 					writeAtomic(files[scope], text);
 					written[scope] = text;
+
+					if (state.watching && state.pendingWatch.has(scope)) {
+						state.pendingWatch.delete(scope);
+						store.watchScopes([scope]);
+					}
 				} catch (e) {
 					log("failed to write " + scope + " state " + files[scope] + ": " + e.message);
 				}
@@ -146,7 +152,13 @@ const createState = (options) => {
 		},
 
 		watch: () => {
-			const onChange = debounce(() => {
+			state.watching = true;
+			store.watchScopes(["project", "global"]);
+		},
+
+		/** Watch the directories of the given scopes' files (skips missing directories until first write). */
+		watchScopes: (scopes) => {
+			const onChange = state.onChange || debounce(() => {
 				const changed = ["project", "global"].some((scope) => {
 					if (!files[scope]) {
 						return false;
@@ -167,8 +179,9 @@ const createState = (options) => {
 					options.onExternalChange();
 				}
 			}, { quietMs: WATCH_DEBOUNCE_MS });
+			state.onChange = onChange;
 
-			["project", "global"].forEach((scope) => {
+			scopes.forEach((scope) => {
 				if (!files[scope]) {
 					return;
 				}
@@ -176,8 +189,12 @@ const createState = (options) => {
 				const dir = path.dirname(path.resolve(files[scope]));
 				const base = path.basename(files[scope]);
 
+				if (!fs.existsSync(dir)) {
+					state.pendingWatch.add(scope);
+					return;
+				}
+
 				try {
-					fs.mkdirSync(dir, { recursive: true });
 					const watcher = fs.watch(dir, (_event, name) => {
 						if (name === base) {
 							onChange();

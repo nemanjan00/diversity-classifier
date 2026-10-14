@@ -492,7 +492,7 @@ const createPatterns = () => {
 					}
 
 					if (/^\s+$/.test(part)) {
-						pushPiece({ src: "\\s+", ws: true }, "whitespace");
+						pushPiece({ src: "\\s+", ws: true, text: part }, "whitespace");
 						return;
 					}
 
@@ -635,6 +635,32 @@ const createPatterns = () => {
 			}
 
 			type = filterTypeOverride(token.filters) || type;
+
+			if (token.typeName === "rest") {
+				// Whitespace right before a trailing `rest` matches exactly as written,
+				// so the captured remainder keeps its own indentation (multiline bodies).
+				const last = pieces[pieces.length - 1];
+
+				if (last && last.ws) {
+					last.src = last.text.split("").map((ch) => {
+						if (ch === " ") {
+							return " ";
+						}
+
+						if (ch === "\t") {
+							return "\\t";
+						}
+
+						if (ch === "\n") {
+							return "\\n";
+						}
+
+						return "\\s";
+					}).join("");
+					segments[segments.length - 1].src = last.src;
+				}
+			}
+
 			const keep = token.name !== "_";
 			const group = "g" + (ctx.counter++);
 			const src = keep ? "(?<" + group + ">" + regexSource + ")" : "(?:" + regexSource + ")";

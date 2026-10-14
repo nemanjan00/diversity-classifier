@@ -52,6 +52,8 @@ const CLASSIFIER_PROPS = {
 	on: str("Sub-classifier: match against this parent field instead of the raw line (envelope children default to the envelope body)"),
 	envelope: bool("Envelope: captures a common line head + body; records matching only the envelope stay unclassified and are clustered by body. Attach real classifiers as children."),
 	body: str("Envelope body field (default 'msg'); must be captured, typically {msg:rest}"),
+	multiline: obj("Envelope only: join continuation lines (stack traces) by their BODY, after the head is stripped: { continue: '^\\s+at |^\\s' } or { start: '^[A-Z]\\w+Error|^\\S' }, group_by: ['task'] (envelope fields that identify one interleaved stream), flush_ms (default 300). The joined record is classified as one; {x:rest} spans lines."),
+	redact: { type: "array", items: { type: "string" }, description: "Fields whose values are masked as [REDACTED] in stored events and in the raw line (prefix match: 'auth' covers auth.*)" },
 	enabled: bool("Default true"),
 	scope: { type: "string", enum: ["project", "global"], description: "Which state file to persist to (default project; global = shared across projects)" }
 };
@@ -120,7 +122,7 @@ const TOOLS = [
 	},
 	{
 		name: "define_classifier",
-		description: "Create or replace a classifier. It immediately runs over the whole unclassified queue: matching records leave the queue and become events with their original timestamps (no alarms fire for them). Returns retro.absorbed and the queue before/after. Persisted for the next run.",
+		description: "Create or replace a classifier. Prefer templates with typed captures (int, duration, bytes...) over catch-all regexes: typed fields are what histograms, field_summary and threshold alarms work on. It immediately runs over the whole unclassified queue: matching records leave the queue and become events with their original timestamps (no alarms fire for them). Returns retro.absorbed and the queue before/after. Persisted for the next run.",
 		mutates: true,
 		inputSchema: schema(CLASSIFIER_PROPS, ["name"]),
 		handler: (engine, args, ctx) => {
@@ -219,6 +221,20 @@ const TOOLS = [
 		inputSchema: schema(FILTER_PROPS),
 		handler: (engine, args) => {
 			return engine.queries.count(args);
+		}
+	},
+	{
+		name: "sequences",
+		description: "Ad-hoc sequence analysis: time between an event of `first` and the next event of `then` with the same `key` value (e.g. per worker/request id). Returns gap stats overall and per key, unmatched count, and recent pairs. The alarm counterpart is kind=sequence.",
+		inputSchema: schema(Object.assign(pick(FILTER_PROPS, ["q", "where", "since", "until"]), {
+			first: str("Classifier name/glob of the starting event"),
+			then: str("Classifier name/glob of the following event"),
+			key: str("Field that must match on both (omit for a single global sequence)"),
+			within: str("Ignore pairs further apart than this, e.g. '5m'"),
+			top: num("Keys to return (default 20)")
+		}), ["first", "then"]),
+		handler: (engine, args) => {
+			return engine.queries.sequences(args);
 		}
 	},
 	{
@@ -413,6 +429,20 @@ const TOOLS = [
 		}, ["lines"]),
 		handler: (engine, args) => {
 			return engine.ingestLines(args.lines, args.source, args.labels);
+		}
+	},
+	{
+		name: "set_redaction",
+		description: "Ingest-time redaction, applied before anything is stored or shown. On by default with builtins: bearer, basic_auth, url_credentials, secret_kv, jwt, private_key_block. Add your own regexes (patterns), choose builtins, or disable. `test` previews the effect on a sample line.",
+		mutates: true,
+		inputSchema: schema({
+			enabled: bool("Turn redaction on/off"),
+			builtin: { type: "array", items: { type: "string" }, description: "Builtin rules to use" },
+			patterns: { type: "array", items: { type: "string" }, description: "Extra regexes; each whole match becomes [REDACTED]" },
+			test: str("Sample text to preview")
+		}),
+		handler: (engine, args, ctx) => {
+			return engine.setRedaction(args, ctx);
 		}
 	},
 	{

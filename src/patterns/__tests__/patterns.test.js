@@ -138,3 +138,15 @@ describe("template compiler", () => {
 		expect(compiled.match("status=503 took=2s").fields).toEqual({ "http.status": 503, took: 2000 });
 	});
 });
+
+describe("timestamp zones", () => {
+	test("zone-less timestamps can be pinned to utc or an offset", () => {
+		const patterns = createPatterns();
+		expect(patterns.compile("{ts:timestamp(utc)} x").match("2026-10-14 12:00:00 x").fields.ts).toBe(Date.parse("2026-10-14T12:00:00Z"));
+		expect(patterns.compile("{ts:iso8601(+02:00)} x").match("2026-10-14T12:00:00 x").fields.ts).toBe(Date.parse("2026-10-14T10:00:00Z"));
+		expect(patterns.compile("{ts:timestamp(utc)} x").match("2026-10-14T12:00:00+01:00 x").fields.ts).toBe(Date.parse("2026-10-14T11:00:00Z"));
+		expect(() => {
+			patterns.compile("{ts:timestamp(mars)}");
+		}).toThrow(/zone/);
+	});
+});

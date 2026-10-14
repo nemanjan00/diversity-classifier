@@ -15,6 +15,9 @@ const createRateCounter = require("../utils/rate-counter").createRateCounter;
 const createState = require("../state").createState;
 const emptyState = require("../state").empty;
 const parseTime = require("../utils/units").parseTime;
+const createRedaction = require("../redaction").createRedaction;
+const maskValues = require("../redaction").maskValues;
+const MASK = require("../redaction").MASK;
 
 const SAMPLE_MATCHES = 5;
 const NEAR_MISSES = 5;
@@ -60,6 +63,8 @@ const createEngine = (options) => {
 		growthFactor: settings.DIGEST_GROWTH_FACTOR
 	});
 	const queries = createQueries({ classifiers, metrics, clusterer });
+	const redaction = createRedaction();
+	const multiline = { pending: new Map(), regexes: new Map() };
 
 	const scopes = {
 		parsers: new Map(),
@@ -94,8 +99,36 @@ const createEngine = (options) => {
 
 	// ------------------------------------------------------------------ ingest
 
+	/** Field-level redaction: classifiers in the path may list fields to mask (value and raw occurrences). */
+	const redactFields = (result, raw) => {
+		const names = result.path.reduce((acc, name) => {
+			const node = classifiers.get(name);
+			return node && node.def.redact ? acc.concat(node.def.redact) : acc;
+		}, []);
+
+		if (!names.length) {
+			return { fields: result.fields, raw };
+		}
+
+		const fields = Object.assign({}, result.fields);
+		const values = [];
+		Object.keys(fields).forEach((key) => {
+			const hit = names.some((name) => {
+				return key === name || key.indexOf(name + ".") === 0;
+			});
+
+			if (hit && fields[key] !== undefined && fields[key] !== null) {
+				values.push(fields[key]);
+				fields[key] = MASK;
+			}
+		});
+
+		return { fields, raw: maskValues(raw, values) };
+	};
+
 	const recordEvent = (record, result, live) => {
 		const leaf = result.node;
+		const redacted = redactFields(result, record.raw);
 		const event = metrics.record({
 			t: result.time || record.t,
 			ingest_t: record.t,
@@ -103,8 +136,9 @@ const createEngine = (options) => {
 			labels: record.labels || {},
 			classifier: leaf.name,
 			path: result.path,
-			fields: result.fields,
-			raw: record.raw
+			fields: redacted.fields,
+			raw: redacted.raw,
+			assembled: record.assembled
 		}, leaf.def.store);
 
 		if (live) {
@@ -122,7 +156,8 @@ const createEngine = (options) => {
 			source: record.source,
 			labels: record.labels || {},
 			envelope: result ? result.envelope : null,
-			body: result ? result.body : null
+			body: result ? result.body : null,
+			assembled: record.assembled
 		};
 		const added = clusterer.add(entry);
 
@@ -135,11 +170,127 @@ const createEngine = (options) => {
 		return added;
 	};
 
+	/**
+	 * Classify a stored record (queue entry or event). Records assembled by
+	 * an envelope's multiline rule are continued from that envelope with
+	 * their joined body; others go through the full tree.
+	 */
+	const classifyStored = (record) => {
+		if (record.assembled) {
+			const continued = classifiers.continueFrom(record.assembled.envelope, record.assembled.fields, record);
+
+			if (continued) {
+				return continued;
+			}
+		}
+
+		const result = classifiers.classify(record);
+
+		if (result && result.multiline) {
+			return classifiers.continueFrom(result.node.name, result.fields, record);
+		}
+
+		return result;
+	};
+
+	const multilineRegex = (node) => {
+		const cfg = node.def.multiline;
+		const cached = multiline.regexes.get(node.name);
+
+		if (cached && cached.cfg === cfg) {
+			return cached.re;
+		}
+
+		const re = new RegExp(cfg.start || cfg.continue);
+		multiline.regexes.set(node.name, { cfg, re });
+		return re;
+	};
+
+	const flushPending = (key) => {
+		const pending = multiline.pending.get(key);
+
+		if (!pending) {
+			return;
+		}
+
+		clearTimeout(pending.timer);
+		multiline.pending.delete(key);
+		const fields = Object.assign({}, pending.fields);
+		fields[pending.bodyField] = pending.bodies.join("\n");
+		const record = Object.assign({}, pending.record, {
+			raw: pending.raws.join("\n"),
+			assembled: { envelope: pending.envelope, fields }
+		});
+		finalize(record, classifyStored(record));
+	};
+
+	const flushAllPending = (source) => {
+		Array.from(multiline.pending.keys()).forEach((key) => {
+			if (!source || multiline.pending.get(key).record.source === source) {
+				flushPending(key);
+			}
+		});
+	};
+
+	/** Envelope multiline (SPEC.md §5.4): join continuation bodies per stream + group_by key. */
+	const pushMultiline = (record, result) => {
+		const node = result.node;
+		const cfg = node.def.multiline;
+		const bodyField = node.def.body;
+		const body = result.fields[bodyField] === undefined || result.fields[bodyField] === null ? "" : String(result.fields[bodyField]);
+		const groupValues = cfg.group_by.map((field) => {
+			return result.fields[field] === undefined ? "" : String(result.fields[field]);
+		});
+		const key = [node.name, record.source, JSON.stringify(record.labels || {})].concat(groupValues).join("\u0001");
+		const re = multilineRegex(node);
+		const isContinuation = cfg.start ? !re.test(body) : re.test(body);
+		const pending = multiline.pending.get(key);
+
+		const schedule = (entry) => {
+			clearTimeout(entry.timer);
+			entry.timer = setTimeout(() => {
+				flushPending(key);
+			}, cfg.flush_ms);
+
+			if (entry.timer.unref) {
+				entry.timer.unref();
+			}
+		};
+
+		if (isContinuation && pending && pending.bodies.length < cfg.max_lines) {
+			pending.bodies.push(body);
+			pending.raws.push(record.raw);
+			schedule(pending);
+			return;
+		}
+
+		if (pending) {
+			flushPending(key);
+		}
+
+		const entry = { envelope: node.name, bodyField, fields: result.fields, record, bodies: [body], raws: [record.raw], timer: null };
+		multiline.pending.set(key, entry);
+		schedule(entry);
+	};
+
 	/** One record from a source. record: { raw, t, source, labels } */
-	const ingest = (record) => {
+	const ingest = (input) => {
+		const raw = redaction.apply(input.raw);
+		const record = raw === input.raw ? input : Object.assign({}, input, { raw });
+		const result = classifiers.classify(record);
+
+		if (result && result.multiline) {
+			pushMultiline(record, result);
+			return;
+		}
+
+		finalize(record, result);
+	};
+
+	/** Count and route a complete (possibly assembled) record. */
+	const finalize = (record, result) => {
 		counters.records++;
 		rates.records.add(record.t);
-		const result = classifiers.classify(record);
 		const perSource = sourceCounters(record.source);
 
 		if (result && result.classified) {
@@ -172,6 +323,7 @@ const createEngine = (options) => {
 	 * context changed are re-clustered.
 	 */
 	const reclassifyQueue = () => {
+		flushAllPending();
 		const before = queueRatio();
 		const absorbed = [];
 		const moved = [];
@@ -179,7 +331,7 @@ const createEngine = (options) => {
 		const sample = [];
 
 		clusterer.records().forEach((record) => {
-			const result = classifiers.classify(record);
+			const result = classifyStored(record);
 
 			if (result && result.classified) {
 				absorbed.push({ record, leaf: result.node.name });
@@ -271,8 +423,8 @@ const createEngine = (options) => {
 		const outcome = { reprocessed: events.length, classified: 0, unclassified: 0, by_classifier: {} };
 
 		events.forEach((event) => {
-			const record = { raw: event.raw, t: event.ingest_t || event.t, source: event.source, labels: event.labels };
-			const result = classifiers.classify(record);
+			const record = { raw: event.raw, t: event.ingest_t || event.t, source: event.source, labels: event.labels, assembled: event.assembled };
+			const result = classifyStored(record);
 
 			if (result && result.classified) {
 				recordEvent(record, result, false);
@@ -346,6 +498,12 @@ const createEngine = (options) => {
 		scopes.dashboards.forEach((def) => {
 			put(def.scope, "dashboards", Object.assign({}, def, { scope: undefined }));
 		});
+
+		const redactionSettings = redaction.persistent();
+
+		if (redactionSettings) {
+			out.project.redaction = redactionSettings;
+		}
 
 		const notificationSettings = notifier.settings();
 		const defaults = { muted: [], quiet_ms: settings.DIGEST_QUIET_MS, max_wait_ms: settings.DIGEST_MAX_WAIT_MS, growth_factor: settings.DIGEST_GROWTH_FACTOR };
@@ -620,8 +778,8 @@ const createEngine = (options) => {
 			const outcome = { removed: names, returned_to_queue: 0, reclassified: 0 };
 
 			events.forEach((event) => {
-				const record = { raw: event.raw, t: event.ingest_t || event.t, source: event.source, labels: event.labels };
-				const result = classifiers.classify(record);
+				const record = { raw: event.raw, t: event.ingest_t || event.t, source: event.source, labels: event.labels, assembled: event.assembled };
+				const result = classifyStored(record);
 
 				if (result && result.classified) {
 					recordEvent(record, result, false);
@@ -865,6 +1023,7 @@ const createEngine = (options) => {
 
 		ingestLines: (lines, sourceName, labels) => {
 			const count = sources.ingest(lines, sourceName, labels);
+			flushAllPending(sourceName || "ingest");
 			return { ingested: count, source: sourceName || "ingest" };
 		},
 
@@ -986,6 +1145,22 @@ const createEngine = (options) => {
 		},
 
 		// notifications ---------------------------------------------------
+
+		/** Ingest-time redaction settings; `test` previews the effect on a sample text. */
+		setRedaction: (change, context) => {
+			const c = change || {};
+			const settings = Object.keys(c).filter((key) => {
+				return key !== "test";
+			}).length ? redaction.configure(c) : redaction.settings();
+
+			if (Object.keys(c).some((key) => {
+				return key !== "test";
+			})) {
+				definitionsChanged("redaction", "settings", context);
+			}
+
+			return Object.assign({ available_builtin: Object.keys(redaction.BUILTINS) }, settings, c.test !== undefined ? { test: redaction.apply(String(c.test)) } : {});
+		},
 
 		setNotifications: (change, context) => {
 			const result = notifier.configure(change || {});
@@ -1185,6 +1360,7 @@ const createEngine = (options) => {
 		},
 
 		stop: () => {
+			flushAllPending();
 			alarms.stop();
 			notifier.stop();
 			sources.stopAll();
@@ -1196,6 +1372,7 @@ const createEngine = (options) => {
 		},
 
 		flush: () => {
+			flushAllPending();
 			notifier.flushDigest();
 
 			if (state) {
@@ -1369,6 +1546,7 @@ const createEngine = (options) => {
 
 		const merged = { parsers: new Map(), classifiers: new Map(), alarms: new Map(), sources: new Map(), visualizations: new Map(), dashboards: new Map() };
 		let notificationSettings = null;
+		let redactionSettings = null;
 		const alarmState = {};
 
 		loaded.layers.forEach((layer) => {
@@ -1382,6 +1560,10 @@ const createEngine = (options) => {
 
 			if (layer.data.notifications) {
 				notificationSettings = layer.data.notifications;
+			}
+
+			if (layer.data.redaction) {
+				redactionSettings = layer.data.redaction;
 			}
 
 			Object.assign(alarmState, layer.data.alarm_state || {});
@@ -1419,6 +1601,16 @@ const createEngine = (options) => {
 		merged.dashboards.forEach((def) => {
 			scopes.dashboards.set(def.name, def);
 		});
+
+		redaction.reset();
+
+		if (redactionSettings) {
+			try {
+				redaction.configure(redactionSettings);
+			} catch (e) {
+				counters.loadErrors.push("redaction: " + e.message);
+			}
+		}
 
 		if (notificationSettings) {
 			try {

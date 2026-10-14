@@ -1,6 +1,7 @@
 const path = require("path");
 const os = require("os");
 const parseArgs = require("util").parseArgs;
+const fs = require("fs");
 
 const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
 
@@ -15,7 +16,7 @@ const DEFAULTS = {
 	DIGEST_MAX_WAIT_MS: 60000,
 	DIGEST_GROWTH_FACTOR: 10,
 	ALARM_HISTORY: 500,
-	STATE_FILE: ".diversity-classifier.json",
+	STATE_FILE: null,
 	GLOBAL_STATE_FILE: path.join(xdgConfig, "diversity-classifier", "global.json"),
 	HTTP: null,
 	HTTP_TOKEN: null,
@@ -41,7 +42,8 @@ Sources (repeatable):
   --unix "[name=]path"       listen for lines on a Unix socket
 
 State:
-  --state <path>             project state file (default ./.diversity-classifier.json)
+  --state <path>             project state file (default ./.claude/diversity-classifier.json;
+                             an existing ./.diversity-classifier.json keeps being used)
   --global-state <path>      global state file (default $XDG_CONFIG_HOME/diversity-classifier/global.json)
   --no-global                do not load or write the global layer
 
@@ -58,6 +60,19 @@ Safety:
 Tuning: any setting can be given as env var DC_<NAME>, e.g. DC_EVENTS_TOTAL=500000
   ${NUMERIC.join(", ")}
 `;
+
+const LEGACY_STATE_FILE = ".diversity-classifier.json";
+const STATE_FILE_DEFAULT = path.join(".claude", "diversity-classifier.json");
+
+/** .claude/diversity-classifier.json, unless a legacy root-level file already exists. */
+const defaultStateFile = () => {
+	try {
+		fs.accessSync(LEGACY_STATE_FILE);
+		return LEGACY_STATE_FILE;
+	} catch (e) {
+		return STATE_FILE_DEFAULT;
+	}
+};
 
 /**
  * Resolve settings: CLI flags > env vars (DC_*) > defaults.
@@ -112,6 +127,10 @@ const resolve = (argv, env) => {
 
 	if (values.state) {
 		settings.STATE_FILE = values.state;
+	}
+
+	if (!settings.STATE_FILE) {
+		settings.STATE_FILE = defaultStateFile();
 	}
 
 	if (values["global-state"]) {

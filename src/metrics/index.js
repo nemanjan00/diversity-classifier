@@ -254,6 +254,28 @@ const createMetrics = (options) => {
 			return buckets;
 		},
 
+		/** Per-second aggregate counts (last hour) of one node, bucketed: works for store=count classifiers. */
+		countSeries: (name, from, to, interval) => {
+			const node = stats.get(name);
+			const start = Math.floor(from / interval) * interval;
+			const n = Math.max(1, Math.ceil((to - start + 1) / interval));
+			const values = new Array(n).fill(0);
+
+			if (node) {
+				node.perSecond.forEach((count, second) => {
+					const i = Math.floor((second * 1000 - start) / interval);
+
+					if (i >= 0 && i < n) {
+						values[i] += count;
+					}
+				});
+			}
+
+			return { times: values.map((_v, i) => {
+				return start + i * interval;
+			}), values };
+		},
+
 		/** Retained window of a node: oldest event still stored (across its store). */
 		retained: (names) => {
 			return names.reduce((acc, name) => {
