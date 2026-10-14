@@ -12,13 +12,13 @@ const PRE_INIT_QUEUE = 50;
 const INSTRUCTIONS = `diversity-classifier watches log streams for you so you never read raw logs line by line.
 
 Loop:
-1. add_source (e.g. command "ssh host journalctl -fu svc -o short-iso"), or ingest pasted lines. Saved command sources from a previous run load paused: list_sources, then start_source.
+1. add_source (e.g. command "ssh host journalctl -fu svc -o short-iso"), or ingest pasted lines. Saved command sources from a previous run load paused: list_sources, then start_source. To collect a first sample, call wait {for:"records", count:200, timeout_s:60} — never shell sleep.
 2. get_unclassified → biggest clusters first. Each has a suggested_template.
 3. If lines share a head (timestamp, level, logger), define_parser {name:"head", template:"^{ts:timestamp} {level:level} ..."} and an envelope classifier {template:"{...head} {msg:rest}", envelope:true}; then classify bodies as children (parent: envelope).
 4. test_classifier with a refined template (rename fields, fix types: duration→ms, bytes, int...). Read near_misses.failed_at to fix templates. Then define_classifier; it absorbs matching queued records immediately. Use store:"count" or ignore_cluster for pure noise.
 5. Ask questions with search_events / histogram / timeseries / field_summary (q like 'status >= 500 and took > 2s').
 6. define_alarm for what matters (rate, threshold, new_value, absence, sequence, source_silent).
-7. Then WAIT for notifications instead of polling: debounced digests of new unclassified clusters, and immediate alarm firings.
+7. Then stop polling: with channels enabled, digests of new unclassified clusters and alarm firings are pushed to you. Without channels, call wait {for:"any"} — it returns as soon as a new cluster, alarm or source failure happens.
 Everything you define persists for the next run. web_ui gives the human a Kibana-like explorer; define_dashboard builds them a view.`;
 
 /**

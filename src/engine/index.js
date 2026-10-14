@@ -21,6 +21,8 @@ const NEAR_MISSES = 5;
 const DIGEST_TOP = 10;
 const DIGEST_SHAPE_MAX = 160;
 const VIEW_NAME_RE = /^[A-Za-z0-9_][\w .-]*$/;
+const WAIT_DEFAULT_S = 60;
+const WAIT_MAX_S = 600;
 
 /*
  * The engine wires everything (SPEC.md §3): record → classify → metrics +
@@ -762,6 +764,103 @@ const createEngine = (options) => {
 					});
 				})
 			};
+		},
+
+		/**
+		 * Block until something worth looking at happens (or timeout).
+		 * @param {{ for?: "any"|"records"|"new_cluster"|"alarm"|"event", count?: number, timeout_s?: number,
+		 *   classifier?: string }} args
+		 * @returns {Promise<object>}
+		 */
+		wait: (args) => {
+			const a = args || {};
+			const kind = a.for || "any";
+			const kinds = ["any", "records", "new_cluster", "alarm", "event"];
+
+			if (kinds.indexOf(kind) === -1) {
+				throw new Error("for must be one of " + kinds.join(", "));
+			}
+
+			const target = Math.max(1, a.count || 1);
+			const timeoutMs = Math.min(WAIT_MAX_S, Math.max(1, a.timeout_s || WAIT_DEFAULT_S)) * 1000;
+			const started = now();
+			const seen = { records: 0, events: 0, new_clusters: [], alarms: [], source_changes: [] };
+
+			return new Promise((resolve) => {
+				const listeners = {};
+				let timer = null;
+
+				const finish = (reason) => {
+					clearTimeout(timer);
+					Object.keys(listeners).forEach((name) => {
+						emitter.removeListener(name, listeners[name]);
+					});
+					const stats = clusterer.stats();
+					resolve({
+						reason,
+						waited_ms: now() - started,
+						records: seen.records,
+						classified_events: seen.events,
+						new_clusters: seen.new_clusters.slice(0, DIGEST_TOP).map((id) => {
+							const cluster = clusterer.get(id);
+							return cluster ? { id, count: cluster.count, shape: cluster.shape.slice(0, DIGEST_SHAPE_MAX) } : { id, absorbed: true };
+						}),
+						alarms: seen.alarms.length ? seen.alarms : undefined,
+						source_changes: seen.source_changes.length ? seen.source_changes : undefined,
+						queue: { clusters: stats.clusters, records: stats.pending }
+					});
+				};
+
+				const check = () => {
+					if (kind === "records" && seen.records >= target) {
+						finish("records");
+					} else if (kind === "event" && seen.events >= target) {
+						finish("event");
+					} else if (kind === "new_cluster" && seen.new_clusters.length >= target) {
+						finish("new_cluster");
+					} else if (kind === "alarm" && seen.alarms.length >= target) {
+						finish("alarm");
+					} else if (kind === "any" && (seen.new_clusters.length || seen.alarms.length || seen.source_changes.length)) {
+						finish(seen.alarms.length ? "alarm" : (seen.source_changes.length ? "source" : "new_cluster"));
+					}
+				};
+
+				listeners.unclassified = (info) => {
+					seen.records++;
+
+					if (info.isNew) {
+						seen.new_clusters.push(info.cluster);
+					}
+
+					check();
+				};
+				listeners.event = (event) => {
+					seen.records++;
+
+					if (!a.classifier || event.path.indexOf(a.classifier) !== -1) {
+						seen.events++;
+					}
+
+					check();
+				};
+				listeners.alarm = (firing) => {
+					seen.alarms.push({ alarm: firing.alarm, text: firing.text, t: firing.t });
+					check();
+				};
+				listeners.source = (change) => {
+					if (change.change === "exited" || change.change === "error") {
+						seen.source_changes.push({ source: change.source, change: change.change, error: change.error, stderr_tail: change.stderr_tail });
+						check();
+					}
+				};
+
+				Object.keys(listeners).forEach((name) => {
+					emitter.on(name, listeners[name]);
+				});
+				timer = setTimeout(() => {
+					finish("timeout");
+				}, timeoutMs);
+			});
 		},
 
 		ingestLines: (lines, sourceName, labels) => {

@@ -331,7 +331,7 @@ const TOOLS = [
 	},
 	{
 		name: "add_source",
-		description: "Start reading a stream. type=command runs `sh -c` (stdout+stderr), e.g. 'ssh prod-1 journalctl -fu api -o short-iso' or 'kubectl logs -f -l app=api --prefix'; restarts with backoff. type=file tails -F a path. tcp/unix listen for lines. labels tag every record ($labels.x). demux splits one stream into many: { regex: '^\\\\[(?<pod>[^\\\\]]+)\\\\] ', label: 'pod', strip: true }. multiline joins stack traces: { start: '^\\\\d{4}-' } or { continue: '^\\\\s' }. Persisted (command sources resume paused next run).",
+		description: "Start reading a stream. type=command runs `sh -c` (stdout+stderr), e.g. 'ssh prod-1 journalctl -fu api -o short-iso', 'kubectl logs -f -l app=api --prefix', 'ssh host docker service logs svc -f -t --tail=0 2>&1' (demux the 'svc.1.taskid@node |' prefix per task); restarts with backoff. type=file tails -F a path. tcp/unix listen for lines. labels tag every record ($labels.x). demux splits one stream into many: { regex: '^\\\\[(?<pod>[^\\\\]]+)\\\\] ', label: 'pod', strip: true }. multiline joins stack traces: { start: '^\\\\d{4}-' } or { continue: '^\\\\s' }. Persisted (command sources resume paused next run).",
 		mutates: true,
 		inputSchema: schema({
 			name: str("Source name"),
@@ -387,6 +387,19 @@ const TOOLS = [
 		inputSchema: schema({}),
 		handler: (engine) => {
 			return engine.listSources();
+		}
+	},
+	{
+		name: "wait",
+		description: "Block until something worth looking at happens, instead of `sleep`: for=any (default; a new unclassified cluster, an alarm, or a source exiting/erroring), records (N records ingested), event (N classified events, optionally of a classifier), new_cluster (N new clusters), alarm (N firings). Returns what happened plus the queue size. Use after add_source to collect a first sample, or to watch without channel notifications.",
+		inputSchema: schema({
+			"for": { type: "string", enum: ["any", "records", "event", "new_cluster", "alarm"] },
+			count: num("How many (default 1)"),
+			classifier: str("For for=event: only count this classifier (or its descendants)"),
+			timeout_s: num("Give up after this many seconds (default 60, max 600)")
+		}),
+		handler: (engine, args) => {
+			return engine.wait(args);
 		}
 	},
 	{

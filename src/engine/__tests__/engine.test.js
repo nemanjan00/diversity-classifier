@@ -222,3 +222,31 @@ describe("engine", () => {
 		expect(result.retro.absorbed).toBe(60);
 	});
 });
+
+describe("engine.wait", () => {
+	test("resolves on records, new clusters and timeout", () => {
+		const dir = tmpDir();
+		const engine = makeEngine(dir);
+		const records = engine.wait({ for: "records", count: 3, timeout_s: 5 });
+		engine.ingestLines(["a 1", "a 2", "b x"], "w");
+
+		return records.then((result) => {
+			expect(result.reason).toBe("records");
+			expect(result.records).toBe(3);
+			expect(result.new_clusters.length).toBe(2);
+
+			const any = engine.wait({ timeout_s: 5 });
+			engine.ingestLines(["a 3"], "w");
+			engine.ingestLines(["brand new"], "w");
+			return any;
+		}).then((result) => {
+			expect(result.reason).toBe("new_cluster");
+			expect(result.new_clusters[0].shape).toBe("brand new");
+
+			return engine.wait({ for: "alarm", timeout_s: 1 });
+		}).then((result) => {
+			expect(result.reason).toBe("timeout");
+			engine.stop();
+		});
+	});
+});

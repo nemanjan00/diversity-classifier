@@ -88,7 +88,7 @@ standard MCP log messages, and the agent can poll `stats` and
    `new_value` (a never-seen client id), `absence` (heartbeat stopped),
    `sequence` (A then B with the same `request_id`), `source_silent` and
    `unclassified`.
-7. **Wait.** Digests of new unclassified clusters are debounced. Alarm
+7. **Wait.** With channels, digests are pushed (debounced) and alarm firings immediately; without channels the agent calls `wait`, which blocks until a new cluster, alarm or source failure. Alarm
    firings are pushed immediately.
 
 Everything the agent defines is **persisted** in `./.diversity-classifier.json`.
