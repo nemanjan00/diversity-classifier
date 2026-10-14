@@ -29,7 +29,7 @@ the token cost of watching it.
 | **Classifier** | A named template plus options. A record that matches becomes an **event** with typed fields. |
 | **Sub-classifier** | A classifier attached to a parent classifier's field. It refines events further (section 5.3). |
 | **Cluster** | A group of unclassified records that share a masked shape (section 6). |
-| **Event** | A classified record: `{ id, t, source, classifier, path, fields, raw? }`. |
+| **Event** | A classified record: `{ id, t, $source, $labels, classifier, path, fields, raw? }`. |
 | **Alarm** | A rule over events that sends a notification when it fires (section 8). |
 
 ## 3. Architecture
@@ -270,6 +270,8 @@ Operators: `eq` (implicit), `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`,
 | `threshold` | `field`, `agg`, `op`, `value`, `window` | aggregate of a field over window crosses value (e.g. p90 of `took` > 2000) |
 | `new_value` | `field` | field takes a value never seen before by this alarm (seen set capped) |
 | `unclassified` | `count`, `window` | unclassified records ≥ count in window (no `classifier`) |
+| `source_silent` | `source`, `window` | a source/label produced no records for window (section 10.1) |
+| `sequence` | `first`, `then`, `within`, `key?` | event of `first` followed by `then` within window, optionally same `key` value (section 10.1) |
 
 States: `ok` → `firing` → (cooldown) → `ok`. Each firing records
 `{ alarm, t, value, sample_event }` in a capped history and sends a
@@ -317,7 +319,48 @@ such as `^\s`), `flush_ms` (multiline flush, default 250), `max_line`
 Sources can also be given at startup via CLI flags (`--file`, `--cmd`, `--tcp`)
 and are persisted in the state file when added through tools.
 
-The `ingest` tool pushes lines directly, for tests or pasted logs.
+The `ingest` tool pushes lines directly, for tests or pasted logs. It takes an
+optional `source` name, `ingest` by default.
+
+### 10.1 Multistream
+
+Any number of sources run concurrently, and each has its own line assembler,
+so multiline records from different streams never interleave.
+
+* **Identity**: every record carries `$source` (the source name) and
+  `$labels` (a map from the source definition, e.g.
+  `{ "labels": { "env": "prod", "service": "api" } }`). Both can be used in
+  `where` (`{"$source": "api", "$labels.env": "prod"}`), `group_by` and alarm
+  filters, just like regular fields.
+* **Demultiplexing a single stream**: one source can carry many logical
+  streams, as with `kubectl logs -l app=x --prefix`,
+  `docker compose logs -f` or `journalctl -f`. A `demux` option splits them:
+  ```jsonc
+  { "name": "k8s", "type": "command",
+    "command": "kubectl logs -f -l app=api --prefix --all-containers",
+    "demux": { "regex": "^\\[(?<pod>[^\\]]+)\\]\\s", "label": "pod", "strip": true } }
+  ```
+  The captured value becomes a label, so each sub-stream gets its own multiline
+  assembly. `strip` removes the prefix before classification, so one
+  classifier works for every pod.
+* **Scoping**: classifiers and alarms take an optional `sources` list (names,
+  or `name:*` glob). By default they apply to all streams. The same template
+  is therefore shared across streams, and per-stream breakdown is a
+  `group_by: "$source"` query rather than a separate classifier.
+* **Clusters**: the cluster key is the masked shape *without* the source, so
+  the same unknown message from 20 pods appears as one cluster. Each cluster
+  holds per-source and per-label counts, and `get_unclassified` can filter by
+  `source`.
+* **Per-stream health**: `list_sources` and `stats` report, per source and per
+  demuxed label, lines/s, last line time, classified ratio, and
+  restarts/errors. A built-in alarm kind `source_silent` (params: `source`,
+  `window`) fires when a stream goes quiet.
+* **Correlation (v1-light)**: `timeseries` with `group_by: "$source"` across
+  a classifier prefix aligns streams on one time axis. A `sequence` alarm
+  kind (params: `first`, `then`, `within`, `key`) fires when event A is
+  followed by event B within a window. With `key`, both events must share the
+  same field value (e.g. `request_id`), which lets one stream's event be
+  matched to another's.
 
 > **Security:** `command` sources run shell commands as the server user. A CLI
 > flag `--allow-commands` (off by default) controls whether the agent may add
