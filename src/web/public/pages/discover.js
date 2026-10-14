@@ -42,34 +42,71 @@ const filterFromValue = (field, value) => {
  */
 const highlightRaw = (raw, fields, options) => {
 	const text = raw || "";
-	const candidates = Object.keys(fields || {}).map((name) => {
+	const isWord = (ch) => {
+		return ch !== undefined && /[\w]/.test(ch);
+	};
+	const entries = Object.keys(fields || {}).map((name) => {
 		const value = fields[name];
-		return { name, text: typeof value === "string" || typeof value === "number" ? String(value) : "" };
+		return { name, value, text: typeof value === "string" || typeof value === "number" ? String(value) : "" };
 	}).filter((c) => {
-		return c.text.length >= 2 && c.text.length < text.length;
+		return c.text.length >= 1 && c.text.length < text.length;
+	});
+	// Container fields (an envelope body, a whole message) hold other fields' values: highlight the parts instead.
+	const candidates = entries.filter((c) => {
+		const inside = entries.filter((other) => {
+			return other !== c && other.text.length >= 2 && other.text.length < c.text.length && c.text.indexOf(other.text) !== -1;
+		});
+		return inside.length < 2;
 	}).sort((a, b) => {
 		return b.text.length - a.text.length;
 	});
 	const taken = [];
 
-	candidates.forEach((c) => {
-		let from = 0;
-		let idx = text.indexOf(c.text, from);
+	/** Occurrences on word boundaries; numbers may carry a unit suffix (22ms, 5MB). */
+	const lowerText = text.toLowerCase();
+	const occurrences = (c) => {
+		const out = [];
+		const exact = text.indexOf(c.text) !== -1;
+		const haystack = exact ? text : lowerText;
+		const needle = exact ? c.text : c.text.toLowerCase();
+		let idx = haystack.indexOf(needle);
 
 		while (idx !== -1) {
 			const end = idx + c.text.length;
-			const overlaps = taken.some((t) => {
-				return idx < t.end && end > t.start;
-			});
+			const before = text[idx - 1];
+			const after = text[end];
+			const numeric = typeof c.value === "number";
+			const leftOk = !isWord(before) || !isWord(c.text[0]);
+			const rightOk = numeric ? !(after !== undefined && /[\d.]/.test(after)) : (!isWord(after) || !isWord(c.text[c.text.length - 1]));
 
-			if (!overlaps) {
-				taken.push({ start: idx, end, name: c.name, value: fields[c.name] });
-				return;
+			if (leftOk && rightOk) {
+				out.push(idx);
 			}
 
-			from = idx + 1;
-			idx = text.indexOf(c.text, from);
+			idx = haystack.indexOf(needle, idx + 1);
 		}
+
+		return out;
+	};
+
+	candidates.forEach((c) => {
+		const free = occurrences(c).filter((idx) => {
+			const end = idx + c.text.length;
+			return !taken.some((t) => {
+				return idx < t.end && end > t.start;
+			});
+		});
+
+		if (!free.length) {
+			return;
+		}
+
+		const keyRe = new RegExp("(?:^|[^\\w.])" + c.name.split(".").pop().replace(/[^\w-]/g, "") + "[\"']?\\s*[=:]\\s*[\"']?$");
+		const keyed = free.find((idx) => {
+			return keyRe.test(text.slice(Math.max(0, idx - c.name.length - 6), idx));
+		});
+		const idx = keyed !== undefined ? keyed : free[0];
+		taken.push({ start: idx, end: idx + c.text.length, name: c.name, value: c.value });
 	});
 
 	taken.sort((a, b) => {
@@ -109,9 +146,11 @@ const toggleColumn = (field) => {
 const filterButtons = (field, value) => {
 	return el("span", { class: "dc-row-actions" },
 		el("button", { type: "button", class: "dc-mini", title: "Filter for value", onclick: () => {
+			pauseLive("filtering from an event");
 			addFilter({ field, value });
 		} }, "+"),
 		el("button", { type: "button", class: "dc-mini", title: "Filter out value", onclick: () => {
+			pauseLive("filtering from an event");
 			addFilter({ field, value, negate: true });
 		} }, "−"),
 		el("button", { type: "button", class: "dc-mini", title: "Toggle column", onclick: () => {
@@ -129,8 +168,11 @@ const fieldValueTable = (event) => {
 	return el("table", { class: "dc-kv" }, el("tbody", {}, ...entries.map((entry) => {
 		return el("tr", {},
 			el("th", {}, entry[0]),
-			el("td", {}, formatValue(entry[1])),
-			el("td", { class: "dc-kv-actions" }, filterButtons(entry[0], entry[1])));
+			el("td", {}, entry[1] === undefined || entry[1] === null ? formatValue(entry[1]) : el("span", {
+				class: "dc-kv-value dc-mark-filter",
+				title: "click: filter · alt/shift-click: exclude",
+				onclick: filterFromValue(entry[0], entry[1])
+			}, formatValue(entry[1])), filterButtons(entry[0], entry[1])));
 	})));
 };
 
@@ -207,7 +249,11 @@ const EventRow = (event, expanded) => {
 			return expanded[event.id] ? "▾" : "▸";
 		}),
 		el("span", { class: "dc-time" }, formatTime(Date.parse(event.t), true)),
-		Badge({ variant: "secondary", class: "dc-badge-c" }, event.classifier),
+		el("span", {
+			class: "dc-mark-filter",
+			title: "classifier = " + event.classifier + "\nclick: filter · alt/shift-click: exclude",
+			onclick: filterFromValue("classifier", event.classifier)
+		}, Badge({ variant: "secondary", class: "dc-badge-c" }, event.classifier)),
 		() => {
 			if (cols().length) {
 				return el("span", { class: "dc-cols" }, ...cols().map((c) => {
@@ -231,9 +277,15 @@ const EventRow = (event, expanded) => {
 				return highlightRaw(event.raw, event.fields, { inline: true });
 			}
 
-			return el("span", { class: "dc-line-raw" }, Object.keys(event.fields).map((k) => {
-				return k + "=" + formatValue(event.fields[k]);
-			}).join(" "));
+			return el("span", { class: "dc-line-raw" }, ...Object.keys(event.fields).reduce((parts, k) => {
+				const value = event.fields[k];
+				const item = value === undefined || value === null ? k + "=" + formatValue(value) : [k + "=", el("mark", {
+					class: "dc-mark dc-mark-filter",
+					title: k + " = " + formatValue(value) + "\nclick: filter · alt/shift-click: exclude",
+					onclick: filterFromValue(k, value)
+				}, formatValue(value))];
+				return parts.concat(parts.length ? [" "] : [], item);
+			}, []));
 		}),
 		when(() => {
 			return expanded[event.id];

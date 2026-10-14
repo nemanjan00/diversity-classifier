@@ -1,6 +1,6 @@
 {
 	"name": "@nemanjan00/diversity-streamer",
-	"version": "0.4.1",
+	"version": "0.4.2",
 	"description": "MCP server that lets an AI agent watch log streams cheaply: teach it templates, get only unknown lines, metrics and alarms",
 	"main": "src/engine/index.js",
 	"bin": {
