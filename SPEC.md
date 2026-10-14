@@ -268,10 +268,10 @@ unclassified record**, not only over new lines.
     "unclassified_ratio": { "before": 0.41, "after": 0.12 } }
   ```
   The agent sees at once how much of the noise the definition removed.
-* **Size.** The buffer is bounded (`UNCLASSIFIED_BUFFER`). Re-runs execute in
-  chunks off the ingest path, so live lines keep flowing during a long re-run.
-  Re-runs are cheap anyway, since the prefilter rejects most records with a
-  single `includes`.
+* **Size.** The buffer is bounded (`UNCLASSIFIED_BUFFER`). Re-runs execute
+  synchronously, so they are atomic with respect to live ingest: no line can
+  slip between the re-run and the new definition. They are cheap, because the
+  prefilter rejects most records with a single `includes`.
 
 `reclassify` (tool) rebuilds events from the retained raw records of a
 classifier subtree, or of everything. It is used after re-ordering priorities
@@ -339,11 +339,10 @@ The **event store** supports exact queries over recent events. It is a ring
 buffer per classifier, under a global cap that evicts oldest-first across
 classifiers. Each classifier reports its **retained window** (oldest retained
 event time). The UI shades time ranges older than that window, and the
-aggregate counters still cover the full history. Field values are interned,
-and numeric fields are stored unboxed in typed arrays per classifier, which
-keeps about 200k events in tens of MB. A query scans only the classifiers that
-match the `classifier` glob, and inside each classifier it binary-searches the
-time range.
+aggregate counters still cover the full history. A query scans only the stores of the classifiers that match the `classifier`
+glob. Events are filtered by time range and `where` in one linear pass, which
+is fast at these sizes and correct even when event time comes from a
+`time_field` and arrives out of order.
 
 ### 7.1 Filter language (`where`)
 
@@ -554,12 +553,13 @@ so multiline records from different streams never interleave.
 | `stats` | Section 7.3. |
 | `define_alarm` / `remove_alarm` / `list_alarms` | Section 8. `list_alarms` includes state and last firing. |
 | `alarm_history` | Recent firings. |
-| `add_source` / `remove_source` / `list_sources` | Section 10. |
+| `add_source` / `remove_source` / `list_sources` / `start_source` / `restart_source` | Section 10. |
 | `ingest` | Push lines. |
+| `search_unclassified` | `q`/`where` search over raw buffered unclassified records (envelope fields included). |
 | `ignore_cluster` | Shortcut: turn a cluster's suggested template into an `ignore.<id>` classifier with `store: "count"`, which removes it from the queue (section 6). |
 | `set_notifications` | Mute, unmute, debounce timing. |
 | `fields` / `field_summary` / `heatmap` | Section 7.3. |
-| `define_visualization` / `define_dashboard` / `remove_*` / `list_*` | Saved charts and dashboards for the web UI (section 13.4). Returns a UI link. |
+| `define_visualization` / `define_dashboard` / `remove_view` / `list_views` | Saved charts and dashboards for the web UI (section 13.4). Returns a UI link. |
 | `web_ui` | Start the web UI on demand (if not started with `--http`) and return its URL. |
 | `export_definitions` / `import_definitions` | Share classifier packs (JSON) between projects. |
 
@@ -588,7 +588,10 @@ Everything the agent defines persists across runs. The next session starts
 with the server already classifying and alarming, and does not need to relearn
 the logs.
 
-**Persisted:** parsers, classifiers, alarms, tool-added sources, saved
+**Persisted:** parsers, classifiers, alarms, tool-added sources (command
+sources load **paused**: a cloned state file must never run commands on
+startup. The agent resumes them with `start_source`, or `--resume-sources`
+opts in), saved
 visualizations and dashboards, notification settings. Also persisted: the
 `new_value` alarms' seen-sets (capped), so a restart does not re-fire on every
 known value.
