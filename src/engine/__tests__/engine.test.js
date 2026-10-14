@@ -460,3 +460,55 @@ describe("residual clustering (new routes)", () => {
 		engine.stop();
 	});
 });
+
+describe("hand-edited state files", () => {
+	test("an edit that does not parse keeps definitions and is never overwritten; fixing it reloads", () => {
+		const dir = tmpDir();
+		const file = path.join(dir, "state.json");
+		const notes = [];
+		const engine = makeEngine(dir);
+		engine.notifier.addSink((note) => {
+			notes.push(note);
+		});
+		engine.defineClassifier({ name: "a", template: "hello {x:int}" });
+		engine.flush();
+
+		const good = fs.readFileSync(file, "utf8");
+		const broken = good.replace("\"hello", "\"hello,, oops");
+		fs.writeFileSync(file, broken + "{");
+		engine.reload();
+
+		expect(engine.listClassifiers({}).classifiers.map((c) => {
+			return c.name;
+		})).toEqual(["a"]);
+		expect(engine.stats().load_errors.length).toBe(1);
+		expect(notes.some((note) => {
+			return /could not be parsed/.test(note.content);
+		})).toBe(true);
+
+		engine.defineClassifier({ name: "b", template: "bye" });
+		engine.flush();
+		expect(fs.readFileSync(file, "utf8")).toBe(broken + "{");
+
+		const fixed = JSON.parse(good);
+		fixed.classifiers.push({ name: "c", template: "fixed {y:int}" });
+		fs.writeFileSync(file, JSON.stringify(fixed));
+		engine.reload();
+		expect(engine.listClassifiers({}).classifiers.map((c) => {
+			return c.name;
+		}).sort()).toEqual(["a", "c"]);
+		expect(engine.stats().load_errors).toBeUndefined();
+		engine.stop();
+	});
+
+	test("a broken file at startup is not overwritten", () => {
+		const dir = tmpDir();
+		const file = path.join(dir, "state.json");
+		fs.writeFileSync(file, "{ not json");
+		const engine = makeEngine(dir);
+		engine.defineClassifier({ name: "x", template: "x" });
+		engine.flush();
+		expect(fs.readFileSync(file, "utf8")).toBe("{ not json");
+		engine.stop();
+	});
+});

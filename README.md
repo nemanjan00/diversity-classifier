@@ -122,6 +122,10 @@ standard MCP log messages, and the agent can poll `stats` and
    blocks until a new cluster, an alarm or a source failure.
 
 Everything the agent defines is **persisted** in `./.claude/diversity-classifier.json`.
+You (or an agent) can edit it by hand: the server watches it and reloads
+definitions live. Invalid definitions load disabled with an error. A file
+that doesn't parse is never overwritten; the current definitions are kept
+until it parses again.
 You can commit it to share the classifier pack with your team. Reusable heads
 can go in a global file shared across projects. On the next run the server
 starts with the same definitions.

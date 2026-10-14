@@ -68,7 +68,7 @@ const createState = (options) => {
 	const files = { project: options.projectFile, global: options.globalFile || null };
 	const written = { project: null, global: null };
 	const log = options.log || (() => {});
-	const state = { snapshot: null, watchers: [], pendingWatch: new Set(), watching: false };
+	const state = { snapshot: null, watchers: [], pendingWatch: new Set(), watching: false, broken: new Set() };
 
 	const store = {
 		files,
@@ -80,6 +80,7 @@ const createState = (options) => {
 		load: () => {
 			const layers = [];
 			const errors = [];
+			const broken = [];
 
 			["global", "project"].forEach((scope) => {
 				if (!files[scope]) {
@@ -95,10 +96,14 @@ const createState = (options) => {
 					}
 				} catch (e) {
 					errors.push(scope + " state (" + files[scope] + "): " + e.message);
+					broken.push(scope);
 				}
 			});
 
-			return { layers, errors };
+			// A file that does not parse is never overwritten: the user (or an agent)
+			// is mid-edit, and the content is theirs. Writes resume once it parses.
+			state.broken = new Set(broken);
+			return { layers, errors, broken };
 		},
 
 		/** Provide a function that returns { project: data, global: data } for saving. */
@@ -119,6 +124,11 @@ const createState = (options) => {
 
 			["project", "global"].forEach((scope) => {
 				if (!files[scope] || !snapshot[scope]) {
+					return;
+				}
+
+				if (state.broken.has(scope)) {
+					log("not writing " + scope + " state " + files[scope] + ": it does not parse; fix the file and it will be reloaded");
 					return;
 				}
 
@@ -149,6 +159,11 @@ const createState = (options) => {
 					log("failed to write " + scope + " state " + files[scope] + ": " + e.message);
 				}
 			});
+		},
+
+		/** Scopes whose file currently fails to parse (writes are suspended). */
+		broken: () => {
+			return Array.from(state.broken);
 		},
 
 		watch: () => {

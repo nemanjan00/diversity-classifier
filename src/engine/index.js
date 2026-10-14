@@ -1489,7 +1489,10 @@ const createEngine = (options) => {
 			const before = new Set(classifiers.nodes().map((node) => {
 				return node.name;
 			}));
-			loadDefinitions(false);
+			if (loadDefinitions(false) === false) {
+				return;
+			}
+
 			const after = new Set(classifiers.nodes().map((node) => {
 				return node.name;
 			}));
@@ -1678,9 +1681,22 @@ const createEngine = (options) => {
 	};
 
 	/** Apply state layers (global, then project). Invalid definitions load disabled. */
+	/** @returns {boolean} false when a reload was refused (a state file does not parse). */
 	const loadDefinitions = (initial) => {
 		const loaded = state.load();
 		counters.loadErrors = loaded.errors.slice();
+
+		if (!initial && loaded.broken.length) {
+			// Keep the definitions in memory; the broken file is not overwritten either.
+			log("state file does not parse, keeping current definitions: " + loaded.errors.join("; "));
+			notifier.notify({
+				kind: "definitions",
+				level: "warning",
+				content: "State file edit could not be parsed; current definitions are kept and the file will not be overwritten until it parses: " + loaded.errors.join("; "),
+				meta: { kind: "definitions", error: "parse" }
+			});
+			return false;
+		}
 
 		patterns.clear();
 		scopes.parsers.clear();
@@ -1804,6 +1820,8 @@ const createEngine = (options) => {
 				counters.loadErrors.push("source " + def.name + ": " + e.message);
 			}
 		});
+
+		return true;
 	};
 
 	return engine;
