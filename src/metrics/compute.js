@@ -2,6 +2,19 @@ const autoInterval = require("../utils/units").autoInterval;
 
 const LOW_CARDINALITY = 30;
 
+/** min/max without spreading (Math.min.apply overflows the stack beyond ~100k values). */
+const minOf = (values) => {
+	return values.reduce((acc, v) => {
+		return v < acc ? v : acc;
+	}, Infinity);
+};
+
+const maxOf = (values) => {
+	return values.reduce((acc, v) => {
+		return v > acc ? v : acc;
+	}, -Infinity);
+};
+
 /*
  * Pure computations over arrays of events (exact queries, SPEC.md §7.3).
  * An event is { id, t, source, labels, classifier, path, fields, raw? }.
@@ -111,9 +124,7 @@ const valuesOf = (events, field) => {
 		return getField(event, field);
 	}).filter((value) => {
 		return value !== undefined && value !== null;
-	}).reduce((acc, value) => {
-		return Array.isArray(value) ? acc.concat(value) : acc.concat([value]);
-	}, []);
+	}).flat();
 };
 
 const isNumericValues = (values) => {
@@ -123,8 +134,8 @@ const isNumericValues = (values) => {
 };
 
 const linearBuckets = (values, options) => {
-	const min = Math.min.apply(null, values);
-	const max = Math.max.apply(null, values);
+	const min = minOf(values);
+	const max = maxOf(values);
 	let bounds = options.bounds;
 
 	if (!bounds) {
@@ -249,10 +260,10 @@ const AGGREGATES = {
 		}, 0) / values.length : null;
 	},
 	min: (_subset, values) => {
-		return values.length ? Math.min.apply(null, values) : null;
+		return values.length ? minOf(values) : null;
 	},
 	max: (_subset, values) => {
-		return values.length ? Math.max.apply(null, values) : null;
+		return values.length ? maxOf(values) : null;
 	},
 	p50: (_subset, values) => {
 		return exactQuantile(values.slice().sort((a, b) => {
@@ -373,9 +384,9 @@ const timeseries = (events, options) => {
 	});
 	const topN = opts.top || 8;
 	const shown = ranked.slice(0, topN);
-	const rest = ranked.slice(topN).reduce((acc, pair) => {
-		return acc.concat(pair[1]);
-	}, []);
+	const rest = ranked.slice(topN).flatMap((pair) => {
+		return pair[1];
+	});
 	const out = shown.map((pair) => {
 		return { key: pair[0], total: pair[1].length, values: series(pair[1]) };
 	});
@@ -409,10 +420,10 @@ const heatmap = (events, field, options) => {
 		return { field, interval, times: [], bounds: [], cells: [] };
 	}
 
-	const min = Math.min.apply(null, points.map((p) => {
+	const min = minOf(points.map((p) => {
 		return p.v;
 	}));
-	const max = Math.max.apply(null, points.map((p) => {
+	const max = maxOf(points.map((p) => {
 		return p.v;
 	}));
 	const useLog = (opts.scale || "log") === "log" && min > 0 && max / min > 20;
@@ -496,9 +507,7 @@ const fieldSummary = (events, options) => {
 	return {
 		sampled: sample.length,
 		fields: Array.from(fields.entries()).map((pair) => {
-			const values = pair[1].reduce((acc, value) => {
-				return Array.isArray(value) ? acc.concat(value) : acc.concat([value]);
-			}, []);
+			const values = pair[1].flat();
 			const numeric = isNumericValues(values);
 			const out = {
 				field: pair[0],

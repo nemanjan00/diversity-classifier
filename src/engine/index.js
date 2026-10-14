@@ -443,6 +443,26 @@ const createEngine = (options) => {
 		return outcome;
 	};
 
+	/** Queued envelope records whose raw line the given top-level classifier would match. */
+	const shadowedBy = (node) => {
+		if (!node || !node.compiled) {
+			return null;
+		}
+
+		const counts = new Map();
+		clusterer.records().forEach((record) => {
+			if (record.envelope && node.compiled.match(record.raw)) {
+				counts.set(record.envelope.name, (counts.get(record.envelope.name) || 0) + 1);
+			}
+		});
+
+		const top = Array.from(counts.entries()).sort((a, b) => {
+			return b[1] - a[1];
+		})[0];
+
+		return top ? { envelope: top[0], count: top[1] } : null;
+	};
+
 	// ------------------------------------------------------------ persistence
 
 	const persist = () => {
@@ -765,8 +785,11 @@ const createEngine = (options) => {
 			const retro = reclassifyQueue();
 			definitionsChanged("classifier", def.name, context);
 			const node = classifiers.get(def.name);
+			const shadowed = !def.parent && retro.absorbed === 0 ? shadowedBy(node) : null;
 
 			return {
+				warning: shadowed ? shadowed.count + " queued record(s) match this template but are claimed first by envelope '" +
+					shadowed.envelope + "' (the first matching top-level classifier wins). Define it with parent: \"" + shadowed.envelope + "\" instead." : undefined,
 				classifier: def.name,
 				replaced: previous || undefined,
 				scope,

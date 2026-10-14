@@ -375,3 +375,20 @@ describe("regressions", () => {
 		});
 	});
 });
+
+describe("shadowed top-level classifiers", () => {
+	test("define_classifier warns when an envelope claims the lines first", () => {
+		const engine = makeEngine(tmpDir());
+		engine.defineClassifier({ name: "env", template: "^[{w:word}] {msg:rest}", envelope: true });
+		engine.ingestLines(["[a] disk full on /data", "[b] disk full on /var"], "app");
+
+		const top = engine.defineClassifier({ name: "disk", template: "disk full on {mount:path}" });
+		expect(top.retro.absorbed).toBe(0);
+		expect(top.warning).toMatch(/claimed first by envelope 'env'/);
+
+		const child = engine.defineClassifier({ name: "env.disk", parent: "env", template: "disk full on {mount:path}" });
+		expect(child.retro.absorbed).toBe(2);
+		expect(child.warning).toBeUndefined();
+		engine.stop();
+	});
+});

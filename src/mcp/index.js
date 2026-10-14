@@ -27,6 +27,7 @@ Where you can get hurt (tread carefully):
 - Only retained events are queryable (see retained_since); older data survives only as counts/aggregates.
 - A restart/reconnect drops events, the queue and metrics (definitions and new_value history persist). Write down evidence before reconnecting.
 - Catch-all classifiers hide structure and swallow new message shapes; prefer one typed template per message kind.
+- The first matching top-level classifier wins: once an envelope matches a line, a new top-level classifier for it never runs. Attach it with parent: <envelope> (define_classifier warns when this happens).
 - store:"count" classifiers keep no events; retro-absorbed records never fire alarms.
 - Multi-line records are only joined if you configure multiline (envelope multiline for prefixed streams); fragments otherwise show up as separate clusters.
 - Zone-less timestamps are read as local time unless the type says otherwise ({ts:timestamp(utc)}).

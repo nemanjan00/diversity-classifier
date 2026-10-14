@@ -272,6 +272,9 @@ reads, so they get treated with care:
   logs to disk is a deliberate non-goal.
 - **Catch-all classifiers** absorb every future variant too, so new message
   shapes never reach the queue. Prefer one typed template per message kind.
+- **First top-level match wins.** Once an envelope claims a line, a new
+  top-level classifier for it never runs; attach it as a child instead
+  (`define_classifier` warns when this happens).
 - **Count-only classifiers** keep no events. **Retro-absorbed** records never
   fire alarms.
 - **Multi-line records** are only joined when configured, and some formats
@@ -281,6 +284,38 @@ reads, so they get treated with care:
   otherwise (`{ts:timestamp(utc)}`).
 - **Redaction** is pattern-based. It catches common credential shapes, not
   everything sensitive.
+
+## How much can it take?
+
+Measured on one core (Node 26, synthetic lines with a shared head, an
+envelope and typed child templates):
+
+| Workload | Throughput |
+|---|---|
+| 10 classifiers | ~100k lines/s |
+| 50 classifiers | ~86k lines/s |
+| 100 classifiers (incl. 20% unknown lines) | ~77k lines/s |
+
+| Query over a full store (200k events) | Time |
+|---|---|
+| `search_events` with `q` | ~65 ms |
+| exact `histogram` over all events | ~85 ms |
+| `timeseries` split by a field | ~75 ms |
+| `field_summary` | ~50 ms |
+
+Things to know at volume:
+
+- **Retention is counted in events, not time.** The default store keeps 200k
+  events (`DC_EVENTS_TOTAL`, roughly 0.6–1.5 kB each), so at 1,000 lines/s
+  exact queries cover the last ~3 minutes. Counters and all-time aggregates
+  (counts, rates, top values, percentiles) cover everything. Raise the limit
+  if you have the memory, or use `store: "count"` for high-volume noise.
+- **Everything runs on one thread.** Queries pause ingestion for their
+  duration. Sources are read with backpressure, so a burst means lag, not lost
+  lines (the producer, e.g. `ssh`, waits).
+- **The unclassified queue** keeps the last 20k unknown records
+  (`DC_UNCLASSIFIED_BUFFER`). Older unknown records survive only as cluster
+  counts, so retroactive classification can't reach them.
 
 ## Limits (by design)
 
