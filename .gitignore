@@ -1,0 +1,4 @@
+node_modules/
+.diversity-classifier.json
+coverage/
+*.log
